@@ -1,0 +1,40 @@
+
+- name: Create custom SELinux policy module file
+  ansible.builtin.template:
+    src: selinux_policy.j2
+    dest: /tmp/{{ container_name }}.te
+
+- name: Compile custom SELinux policy
+  command: checkmodule -M -m -o /tmp/{{ container_name }}.mod /tmp/{{ container_name }}.te
+  args:
+    creates: /tmp/{{ container_name }}.mod
+
+- name: Create custom policy package
+  command: semodule_package -o /tmp/{{ container_name }}.pp -m /tmp/{{ container_name }}.mod
+  args:
+    creates: /tmp/{{ container_name }}.pp
+
+- name: Install custom SELinux policy
+  ansible.builtin.command:
+    cmd: semodule -i /tmp/{{ container_name }}.pp
+
+- name: Apply custom SELinux label to file
+  ansible.builtin.file:
+    path: "{{ item }}"
+    setype: "{{ container_name }}_t"
+    serole: object_r
+    seuser: system_u
+    selevel: s0
+  loop: "{{ selinux_files_to_label | default([]) }}"
+  when: selinux_files_to_label is defined and selinux_files_to_label
+
+- name: Apply custom SELinux label to directory
+  ansible.builtin.file:
+    path: "{{ item }}"
+    setype: "{{ container_name }}_t"
+    serole: object_r
+    seuser: system_u
+    selevel: s0
+    recurse: true
+  loop: "{{ selinux_dirs_to_label|default([]) }}"
+  when: selinux_dirs_to_label is defined and selinux_dirs_to_label

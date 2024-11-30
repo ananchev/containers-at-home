@@ -1,0 +1,109 @@
+- hosts: coreos
+  become: true 
+  gather_facts: False
+  vars:
+    ansible_python_interpreter: /usr/bin/python # See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html
+    host_directory: /opt/docker/frontail
+    container_name: frontail
+   
+  vars_files:
+    - ../vault.yml
+  tasks:
+    - name: Get the status of openhab docker container
+      community.docker.docker_container_info:
+        name: openhab
+      register: openhab_container_info
+
+    - name: Debug container data
+      ansible.builtin.debug:
+        msg: "{{ openhab_container_info }}"
+
+    - name: Fail the playbook if the container does not exist
+      fail:
+        msg: "The container openhab does not exist"
+      when: not openhab_container_info.exists
+
+    - name: Find the source for /openhab/userdata
+      set_fact:
+        openhab_conf_source: "{{ item.Source }}"
+      loop: "{{ openhab_container_info.container.Mounts }}"
+      when: item.Destination == '/openhab/userdata'
+
+    - name: Fail if the source directory for openhab/userdata was not found
+      fail:
+        msg: "The source directory for openhab/userdata was not found."
+      when: not openhab_conf_source is defined or local_backup_folder is none
+
+    # - name: Print the host mounts of openhab container
+    #   ansible.builtin.debug:
+    #     msg: "The source path for /openhab/conf is {{ openhab_conf_source }}"
+
+    - name: Populate selinux_files_to_label list
+      set_fact:
+        selinux_files_to_label: 
+          - "{{ openhab_conf_source }}/logs/openhab.log"
+          - "{{ openhab_conf_source }}/logs/events.log"
+
+    - name: Configure SELinux
+      ansible.builtin.include_tasks:
+        file: ../_templates/configure_selinux.yml
+
+    - name: Define the container mount paths
+      set_fact:
+        container_mounts: > 
+          {{
+            selinux_files_to_label |
+            map('regex_search', '[^\/]+(?=(?:\.[^.]+)?$)') |
+            map('regex_replace', '^(.*)$', '/logs/\1') 
+          }}
+
+    - name: Build mounts list as text
+      ansible.builtin.set_fact:
+        mounts_list_text: |
+          {% for source, target in selinux_files_to_label|zip(container_mounts) %}
+          - source: {{ source }}
+            target: {{ target }}
+            type: bind
+            read_only: true
+          {% endfor %}
+
+    - name: Process mounts list to structure
+      set_fact:
+        mounts_list: "{{ mounts_list_text|from_yaml }}"
+
+    # - name: Print the mounts list structure
+    #   ansible.builtin.debug:
+    #     var: mounts_list
+
+    - name: Create build directory
+      file:
+        path: "{{ host_directory }}"
+        state: directory
+        mode: '0755'
+
+    - name: Clone the repository
+      git:
+          repo: 'https://github.com/mthenw/frontail.git' 
+          dest: "{{ host_directory }}/source"
+
+    - name: Build the frontail image 
+      community.docker.docker_image:
+        source: build
+        build:
+          path: "{{ host_directory }}/source"
+          rm: true
+        name: tonio-frontail:latest
+
+    # - name: Cleanup the non-tagged images (used during build)
+    #   ansible.builtin.command: docker image prune -f
+
+    - name: Run the container
+      community.docker.docker_container:
+        name: "{{ container_name }}"
+        detach: true
+        image: tonio-frontail:latest
+        mounts: "{{ mounts_list }}"
+        command: "{{ container_mounts }}"
+        ports:
+        - 9001:9001
+        restart_policy: unless-stopped

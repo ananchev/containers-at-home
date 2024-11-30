@@ -1,0 +1,75 @@
+- hosts: coreos
+  become: true 
+  gather_facts: False
+  vars:
+    ansible_python_interpreter: /usr/bin/python # See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html
+    host_directory: /opt/docker/afvalwijzer
+    container_name: afvalwijzer
+    selinux_files_to_label:
+    - "{{ host_directory }}/afvalwijzer.log"
+    - "{{ host_directory }}/source/telegram-send.conf"
+  vars_files:
+    - ../vault.yml
+  tasks:
+    - name: Create build directory
+      file:
+        path: "{{ host_directory }}"
+        state: directory
+        mode: '0755'
+    
+    - name: Clone the repository
+      git:
+          repo: 'https://github.com/ananchev/afvalwijzer.git' 
+          dest: "{{ host_directory }}/source"
+
+    - name: Initiate empty log file
+      ansible.builtin.copy:
+        content: ""
+        dest: "{{ host_directory }}/afvalwijzer.log"
+        mode: '0644'
+
+    - name: Create telegram-send.conf
+      ansible.builtin.copy:
+        content: |
+            [telegram]
+            token = {{ afvalwijzer_telegram_token }}
+            chat_id = {{ afvalwijzer_telegram_chat_id }}
+        dest: "{{ host_directory }}/source/telegram-send.conf"
+        mode: '0644'
+
+    - name: Configure SELinux
+      ansible.builtin.include_tasks:
+        file: ../_templates/configure_selinux.yml
+
+    - name: Build the afvalwijzer image 
+      community.docker.docker_image:
+        source: build
+        build:
+          path: "{{ host_directory }}/source"
+          rm: true
+        name: afvalwijzer:latest
+
+    - name: Cleanup the non-tagged images
+      ansible.builtin.command: docker image prune -f
+
+    - name: Run the container
+      community.docker.docker_container:
+        name: afvalwijzer
+        detach: true
+        network_mode: bridge
+        image: afvalwijzer:latest
+        env:
+          URL: "{{ afvalwijzer_query_url }}"
+          MQTT_SERVER: "192.168.2.8"
+          MQTT_TOPIC: garbage_collection
+          TZ: Europe/Amsterdam
+        mounts:
+          - source: "{{ host_directory }}/afvalwijzer.log"
+            target: /app/afvalwijzer.log
+            type: bind
+            read_only: no 
+          - source: /etc/localtime
+            target: /etc/localtime
+            type: bind
+            read_only: yes
+        restart_policy: unless-stopped

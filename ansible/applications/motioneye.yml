@@ -1,0 +1,68 @@
+- hosts: coreos
+  become: true 
+  gather_facts: False
+  vars:
+    ansible_python_interpreter: /usr/bin/python # See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html
+    host_directory: /opt/docker/motioneye
+    container_name: motioneye
+    local_backup_folder: /Users/ananchev/coreos/application_data/motioneye
+  vars_files:
+    - ../vault.yml
+
+  tasks:
+  - name: Create directory
+    file:
+      path: "{{ item }}"
+      state: directory
+      mode: '0755'
+    loop:
+      - "{{ host_directory }}"
+
+  - block:
+    - name: Copy the archive to the remote machine
+      ansible.builtin.copy:
+        src: "{{ local_backup_folder }}/backup.tar.gz"
+        dest: "/tmp"
+    - name: Unzip file into the existing folder
+      ansible.builtin.command: >
+        tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}
+      become: true
+    when: local_backup_folder is defined and local_backup_folder is not none
+
+  - name: Restart chronyd service - solves a problem with docker build
+    ansible.builtin.service:
+      name: chronyd
+      state: restarted
+  
+  - name: Clone the repository
+    git:
+        repo: 'https://github.com/motioneye-project/motioneye.git' 
+        dest: "{{ host_directory }}/source"
+        
+  - name: Build the motioneye image 
+    community.docker.docker_image:
+      source: build
+      build:
+        path: "{{ host_directory }}/source"
+        dockerfile: docker/Dockerfile
+        rm: true
+      name: ananchev-motioneye
+
+  - name: Run the container
+    community.docker.docker_container:
+      name: "{{ container_name }}"
+      image: ananchev-motioneye
+      detach: true
+      ports:
+        - 8765:8765
+      volumes:
+        - "{{ host_directory }}:/etc/motioneye:Z"
+        - "{{ host_directory }}:/var/lib/motioneye:Z"
+      mounts:
+      - source: /etc/localtime
+        target: /etc/localtime
+        type: bind
+        read_only: yes
+      restart_policy: unless-stopped
+      env:
+        TZ: "Europe/Amsterdam"

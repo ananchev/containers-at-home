@@ -1,0 +1,61 @@
+- hosts: coreos
+  become: true 
+  gather_facts: False
+  vars:
+    ansible_python_interpreter: /usr/bin/python # See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html
+    host_directory: /opt/docker/grafana
+    container_name: grafana
+    docker_network: influx-grafana
+    local_backup_folder: /Users/ananchev/coreos/application_data/grafana
+  vars_files:
+    - ../vault.yml
+
+  tasks:
+  - name: Create directory
+    file:
+      path: "{{ item }}"
+      state: directory
+      mode: '0755'
+    loop:
+      - "{{ host_directory }}"
+      - "{{ host_directory }}/data"
+
+  - block:
+    - name: Copy the archive to the remote machine
+      ansible.builtin.copy:
+        src: "{{ local_backup_folder }}/backup.tar.gz"
+        dest: "/tmp"
+    - name: Unzip file into the existing folder
+      ansible.builtin.command: >
+        tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/data
+      become: true
+
+    - name: Change ownership recursively of the data directory
+      ansible.builtin.file:
+        path: "{{ host_directory }}/data"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        recurse: true
+      become: true
+    when: local_backup_folder is defined and local_backup_folder is not none
+
+  - name: Create the common network to use with grafana container
+    community.docker.docker_network:
+      name: "{{ docker_network }}"
+      driver: bridge
+      state: present
+
+  - name: Run the container
+    community.docker.docker_container:
+      name: "{{ container_name }}"
+      network_mode: "{{ docker_network }}"
+      image: grafana/grafana
+      detach: true
+      user: "1001:"
+      ports:
+        - 3000:3000
+      volumes:
+        - "{{ host_directory }}/data:/var/lib/grafana:Z"
+      restart_policy: unless-stopped
+      env:
+        GF_INSTALL_PLUGINS: "marcusolsson-dynamictext-panel"

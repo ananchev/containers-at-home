@@ -1,0 +1,91 @@
+- hosts: coreos
+  become: true 
+  gather_facts: False
+  vars:
+    ansible_python_interpreter: /usr/bin/python # See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html
+    host_directory: /opt/docker/homeconnect-proxy
+    container_name: homeconnect_proxy
+    mount_access_mode: '0666'
+    mount_access_owner: '65532' # owned by container's non-root user (uid 65532)
+    mount_access_group: '65532' # owned by container's non-root group (uid 65532)
+    selinux_files_to_label:
+    - "{{ host_directory }}/token.cache"
+    - "{{ host_directory }}/app.log"
+  vars_files:
+    - ../vault.yml
+  tasks:
+    - name: Create build directory
+      file:
+        path: "{{ host_directory }}"
+        state: directory
+        mode: '0755'
+
+    - name: Clone the repository
+      git:
+          repo: 'https://github.com/ananchev/homeconnect-proxy.git' 
+          dest: "{{ host_directory }}/source"
+
+    - name: Initiate empty log file
+      ansible.builtin.copy:
+        content: ""
+        dest: "{{ host_directory }}/app.log"
+        mode: "{{ mount_access_mode }}"
+        owner: "{{ mount_access_owner }}"
+        group: "{{ mount_access_owner }}"
+
+    - name: Write dummy token file - will be updated upon first auth
+      ansible.builtin.copy:
+        content: |
+          {
+            "access_token":"",
+            "expires_at":1729281641,
+            "expires_in":86400,
+            "id_token":"",
+            "refresh_token":"",
+            "scope":"IdentifyAppliance Control Settings Monitor",
+            "token_type":"Bearer"
+          }
+        dest: "{{ host_directory }}/token.cache"
+        mode: "{{ mount_access_mode }}"
+        owner: "{{ mount_access_owner }}"
+        group: "{{ mount_access_owner }}"
+
+    - name: Configure SELinux
+      ansible.builtin.include_tasks:
+        file: ../_templates/configure_selinux.yml
+
+    - name: Build the home-connect image 
+      community.docker.docker_image:
+        source: build
+        build:
+          path: "{{ host_directory }}/source"
+          rm: true
+        name: homeconnect-proxy:latest
+
+    - name: Cleanup the non-tagged images
+      ansible.builtin.command: docker image prune -f
+
+    - name: Run the container
+      community.docker.docker_container:
+        name: homeconnect-proxy
+        detach: true
+        network_mode: bridge
+        image: homeconnect-proxy:latest
+        ports:
+          - "8088:8088"
+        env:
+          CLIENT_ID: "{{ homeconnect_app_client_id }}"
+          CLIENT_SECRET: "{{ homeconnect_app_client_secret }}"
+          CLIENT_SCOPES: IdentifyAppliance%20Control%20Settings%20Monitor
+          MQTT_HOST: "192.168.2.8"
+          TZ: Europe/Amsterdam
+        mounts:
+          - source: "{{ host_directory }}/app.log"
+            target: /app.log
+            type: bind
+            read_only: no 
+          - source: "{{ host_directory }}/token.cache"
+            target: /token.cache
+            type: bind
+            read_only: no 
+        restart_policy: unless-stopped

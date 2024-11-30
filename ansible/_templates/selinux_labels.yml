@@ -1,0 +1,20 @@
+- name: Apply custom SELinux label to file
+  ansible.builtin.file:
+    path: "{{ item }}"
+    setype: "{{ container_name }}_t"
+    serole: object_r
+    seuser: system_u
+    selevel: s0
+  loop: "{{ selinux_files_to_label | default([]) }}"
+  when: selinux_files_to_label is defined and selinux_files_to_label
+
+- name: Apply custom SELinux label to directory
+  ansible.builtin.file:
+    path: "{{ item }}"
+    setype: "{{ container_name }}_t"
+    serole: object_r
+    seuser: system_u
+    selevel: s0
+    recurse: true
+  loop: "{{ selinux_dirs_to_label|default([]) }}"
+  when: selinux_dirs_to_label is defined and selinux_dirs_to_label

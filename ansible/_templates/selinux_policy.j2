@@ -1,0 +1,40 @@
+# Template: selinux_policy.j2
+
+module {{ container_name }} 1.0;
+
+require {
+    type unconfined_t;
+    type container_t;
+    type container_runtime_t;
+    type fs_t;
+    class file { create append open read write rename relabelto relabelfrom setattr getattr unlink mounton lock ioctl map watch };
+    class filesystem associate;
+    class dir { read write create open add_name remove_name reparent search relabelto setattr getattr unlink mounton };
+}
+
+# Define new selinux context specific for our container application
+type {{ container_name }}_t;
+
+# Allow the container context to interact with the file system resources
+allow {{ container_name }}_t fs_t:filesystem associate;
+
+# Following block is executed if SELinux permissions are needed for file objects
+{% if selinux_files_to_label is defined and selinux_files_to_label | length > 0 %}
+# File operations execuded with administrative rights
+allow unconfined_t {{ container_name }}_t:file {create relabelto getattr open read write rename unlink ioctl};
+
+# File persmissions for containers and container runtimes 
+allow container_t {{ container_name }}_t:file {create append open read write rename map setattr getattr unlink lock watch ioctl};
+allow container_runtime_t {{ container_name }}_t:file {getattr mounton relabelfrom relabelto};
+{% endif %}
+
+
+# This is executed if SELinux permissions are needed for directory objects
+{% if selinux_dirs_to_label is defined and selinux_dirs_to_label | length > 0 %}
+# Directory operations execuded with administrative rights
+allow unconfined_t {{ container_name }}_t:dir {read write create open add_name remove_name reparent search relabelto getattr unlink};
+
+# Directory persmissions for containers and container runtimes 
+allow container_t {{ container_name }}_t:dir {read write create open search add_name remove_name reparent setattr getattr unlink};
+allow container_runtime_t {{ container_name }}_t:dir {getattr mounton search};
+{% endif %}

@@ -1,0 +1,132 @@
+- hosts: coreos
+  become: true 
+  gather_facts: False
+  vars:
+    ansible_python_interpreter: /usr/bin/python # See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html    
+    docker_network: authelia-net
+    local_backup_folder: /Users/ananchev/coreos/application_data/authelia
+  vars_files:
+    - ../vault.yml
+  
+  tasks:
+  - name: Deploy the redis container
+    block:
+
+    - name: Set related variables (Redis)
+      set_fact:
+        host_directory: /opt/docker/authelia/redis
+        container_name: authelia-redis
+        local_backup_folder: /Users/ananchev/coreos/application_data/authelia
+
+    - name: Create host directory
+      file:
+        path: "{{ host_directory }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create the common docker network
+      community.docker.docker_network:
+        name: "{{ docker_network }}"
+        driver: bridge
+        state: present
+    
+    - name: Copy local backup to the remote machine 
+      ansible.builtin.copy:
+        src: "{{ local_backup_folder }}/dump.rdb"
+        dest: "{{ host_directory }}/dump.rdb"
+        mode: '0644' 
+
+    - name: Add the dump.rdb selinux_files_to_label
+      set_fact:
+        selinux_files_to_label:
+        - "{{ host_directory }}/dump.rdb"    
+
+    - name: Add the host mount to selinux_dirs_to_label
+      set_fact:
+        selinux_dirs_to_label:
+        - "{{ host_directory }}"
+
+    - name: Configure SELinux for Redis
+      ansible.builtin.include_tasks:
+        file: ../_templates/configure_selinux.yml
+
+    - name: Run the redis container
+      community.docker.docker_container:
+        name: "{{ container_name }}"
+        hostname: authelia_redis_1
+        detach: true
+        network_mode: "{{ docker_network }}"
+        image: redis:alpine
+        env:
+          TZ: Europe/Amsterdam
+        mounts:
+          - source: "{{ container_name }}"
+            target: /data
+            read_only: no 
+        expose:
+          - "6379"
+        restart_policy: unless-stopped
+
+  - name: Deploy the authelia container
+    block:
+
+    - name: Set related variables (Authelia)
+      set_fact:
+        host_directory: /opt/docker/authelia
+        container_name: authelia
+        redis_container_name: authelia-redis
+        redis_port: "6379"
+        selinux_dirs_to_label: []
+        selinux_files_to_label: [] 
+
+    - name: Create host directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop: 
+        - "{{ host_directory }}"
+        - "{{ host_directory }}/config"
+
+    - name: Copy the archive to the remote machine
+      ansible.builtin.copy:
+        src: "{{ local_backup_folder }}/backup.tar.gz"
+        dest: "/tmp"
+
+    - name: Unzip file into the existing folder
+      ansible.builtin.command: >
+        tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/config
+      become: true
+
+    - name: Restart chronyd service to ensure system clock gets properly synchronized
+      ansible.builtin.service:
+        name: chronyd
+        state: restarted
+
+    - name: Get details of the Redis container
+      community.docker.docker_container_info:
+        name: "{{ redis_container_name }}"
+      register: redis_container_info
+
+    - name: Make sure Redis is running
+      wait_for:
+        host: "{{ redis_container_info.container.NetworkSettings.Networks[docker_network].IPAddress }}"
+        port: "{{ redis_port }}"
+        state: started
+        delay: 10
+        timeout: 60
+        sleep: 5
+
+    - name: Run the authelia container
+      community.docker.docker_container:
+        name: "{{ container_name }}"
+        detach: true
+        network_mode: "{{ docker_network }}"
+        image: authelia/authelia 
+        env:
+          TZ: Europe/Amsterdam
+        ports:
+          - "9091:9091"
+        volumes:
+          - "{{ host_directory }}/config:/config:Z"
+        restart_policy: unless-stopped
