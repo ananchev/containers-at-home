@@ -5,35 +5,35 @@ storage:
     - path: /etc/ssh/ssh_host_rsa_key
       mode: 0600
       contents:
-        local: coreos-ssh_host_rsa_key
+        local: vm/coreos-ssh_host_rsa_key
     - path: /etc/ssh/ssh_host_rsa_key.pub
       mode: 0644
       contents:
-        local: coreos-ssh_host_rsa_key.pub
+        local: vm/coreos-ssh_host_rsa_key.pub
     - path: /etc/ssh/ssh_host_dsa_key
       mode: 0600
       contents:
-        local: coreos-ssh_host_dsa_key
+        local: vm/coreos-ssh_host_dsa_key
     - path: /etc/ssh/ssh_host_dsa_key.pub
       mode: 0644
       contents:
-        local: coreos-ssh_host_dsa_key.pub
+        local: vm/coreos-ssh_host_dsa_key.pub
     - path: /etc/ssh/ssh_host_ecdsa_key
       mode: 0600
       contents:
-        local: coreos-ssh_host_ecdsa_key
+        local: vm/coreos-ssh_host_ecdsa_key
     - path: /etc/ssh/ssh_host_ecdsa_key.pub
       mode: 0644
       contents:
-        local: coreos-ssh_host_ecdsa_key.pub
+        local: vm/coreos-ssh_host_ecdsa_key.pub
     - path: /etc/ssh/ssh_host_ed25519_key
       mode: 0600
       contents:
-        local: coreos-ssh_host_ed25519_key
+        local: vm/coreos-ssh_host_ed25519_key
     - path: /etc/ssh/ssh_host_ed25519_key.pub
       mode: 0644
       contents:
-        local: coreos-ssh_host_ed25519_key.pub
+        local: vm/coreos-ssh_host_ed25519_key.pub
   links:
     - path: /etc/localtime
       target: ../usr/share/zoneinfo/Europe/Amsterdam
