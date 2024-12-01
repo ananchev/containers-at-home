@@ -1,6 +1,6 @@
 1. Create ignition configuration 
 ```shell
-ignition/butane --pretty --files-dir ignition --strict ignition/vm/config.bu > ignition/vm/config.ign
+ignition/butane --pretty --files-dir ignition --strict ignition/fed/config.bu > ignition/fed/config.ign
 ```
 
 2. Download latest Fedora CoreOS QEMU image for aarch64 from [here](https://fedoraproject.org/coreos/download?stream=stable&arch=aarch64#download_section).
@@ -9,8 +9,8 @@ ignition/butane --pretty --files-dir ignition --strict ignition/vm/config.bu > i
 
 4. Copy to the host folder the UEFI Firmware images.
 Below source locations are for QEMU installed with homebrew.
-Firmware code: ```/opt/homebrew/opt/qemu/share/qemu/edk2-aarch64-code.fd ```
-Variable data: ```/opt/homebrew/opt/qemu/share/qemu/edk2-arm-vars.fd```
+   - Firmware code: ```/opt/homebrew/opt/qemu/share/qemu/edk2-aarch64-code.fd ```
+   - Variable data: ```/opt/homebrew/opt/qemu/share/qemu/edk2-arm-vars.fd```
 
 5. Shell script to run the vm under [QEMU console](https://github.com/ananchev/qemu-console).
 ```shell
