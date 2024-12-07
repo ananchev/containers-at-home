@@ -29,17 +29,17 @@
         state: started
         enabled: yes
 
-    - name: Download HetrixTools server monitoring agent
-      ansible.builtin.get_url:
-        url: https://raw.githubusercontent.com/hetrixtools/agent/master/hetrixtools_install.sh
-        dest: /tmp/hetrixtools_install.sh
-        mode: '0755'
+    # - name: Download HetrixTools server monitoring agent
+    #   ansible.builtin.get_url:
+    #     url: https://raw.githubusercontent.com/hetrixtools/agent/master/hetrixtools_install.sh
+    #     dest: /tmp/hetrixtools_install.sh
+    #     mode: '0755'
 
-    - name: Install HetrixTools server monitoring agent
-      ansible.builtin.shell: >
-        /tmp/hetrixtools_install.sh {{ hetrix_monitoring_agent_uid }} 1 docker,ssh 0 0 1 0
-      args:
-        executable: /bin/bash
+    # - name: Install HetrixTools server monitoring agent
+    #   ansible.builtin.shell: >
+    #     /tmp/hetrixtools_install.sh {{ hetrix_monitoring_agent_uid }} 1 docker,ssh 0 0 1 0
+    #   args:
+    #     executable: /bin/bash
 
     - name: Unconditionally reboot the machine with all defaults
       ansible.builtin.reboot:

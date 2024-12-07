@@ -5,7 +5,7 @@
     ansible_python_interpreter: /usr/bin/python # See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html
     host_directory: /opt/docker/motioneye
     container_name: motioneye
-    local_backup_folder: /Users/ananchev/coreos/application_data/motioneye
+    local_backup_folder: "{{ application_data }}/motioneye"
   vars_files:
     - ../vault.yml
 

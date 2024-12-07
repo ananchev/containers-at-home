@@ -4,7 +4,7 @@
   vars:
     ansible_python_interpreter: /usr/bin/python # See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html    
     docker_network: authelia-net
-    local_backup_folder: /Users/ananchev/coreos/application_data/authelia
+    local_backup_folder: "{{ application_data }}/authelia"
   vars_files:
     - ../vault.yml
   

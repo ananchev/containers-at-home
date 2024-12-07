@@ -1,14 +1,16 @@
 #!/bin/bash
 
-# Check if a playbook file is supplied as an argument
-if [ -z "$1" ]; then
-  echo "Error: No playbook specified."
-  echo "Usage: $0 playbook.yml"
+if [ -z "$1" ] || [ -z "$2" ]; then
+  echo "Error: Missing arguments."
+  echo "Usage: $0 inventory_file playbook.yml"
   exit 1
 fi
 
+INVENTORY_FILE=$1
+PLAYBOOK_FILE=$2
+
 ansible-playbook \
-    -i ansible/inventory \
+    -i "$INVENTORY_FILE" \
     --private-key /Users/ananchev/.ssh/id_rsa_fed \
     --ask-vault-pass \
-    "$1"
+    "$PLAYBOOK_FILE"

@@ -6,7 +6,7 @@
     host_directory: /opt/docker/influxdb
     container_name: influxdb
     docker_network: influx-grafana
-    local_backup_folder: /Users/ananchev/coreos/application_data/influxdb
+    local_backup_folder: "{{ application_data }}/influxdb"
   vars_files:
     - ../vault.yml
 

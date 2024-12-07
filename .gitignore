@@ -2,6 +2,7 @@
 *.tar.gz
 *.sql
 *.rdb
+mosquitto.db
 influxdb.conf
 *.DS_Store
 *.manifest

@@ -1,0 +1,3 @@
+ansible_user: ananchev
+ansible_become: true
+application_data: /Users/ananchev/Development/containers-at-home/application_data

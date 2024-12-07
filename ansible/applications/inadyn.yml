@@ -1,0 +1,56 @@
+- hosts: coreos
+  become: true 
+  gather_facts: False
+  vars:
+    ansible_python_interpreter: /usr/bin/python # See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html
+    host_directory: /opt/docker/inadyn
+    container_name: inadyn
+  vars_files:
+    - ../vault.yml
+
+  tasks:
+  - name: Create directory
+    file:
+      path: "{{ item }}"
+      state: directory
+      mode: '0755'
+    loop:
+      - "{{ host_directory }}"
+
+  - name: Create inadyn.conf
+    ansible.builtin.copy:
+      content: |
+        # In-A-Dyn v2.0 configuration file format
+        period          = 30000
+        user-agent      = Mozilla/5.0
+
+        provider cloudflare.com {
+            username = {{ inadyn_cloudflare_token_username }}  
+            password = {{ inadyn_cloudflare_token_password }} #Api token with permissions: Zone.Zone - Read, Zone.DNS - Edit.
+            hostname = {{ inadyn_cloudflare_hostname }} 
+            ttl = 1 # optional, value of 1 is 'automatic'.
+            proxied = true # optional.
+        }
+      dest: "{{ host_directory }}/inadyn.conf"
+      mode: '0644'
+
+  - name: Add the conf file to selinux_files_to_label
+    set_fact:
+      selinux_files_to_label:
+      - "{{ host_directory }}/inadyn.conf"
+
+  - name: Configure SELinux
+    ansible.builtin.include_tasks:
+      file: ../_templates/configure_selinux.yml
+
+  - name: Run the container
+    community.docker.docker_container:
+      name: "{{ container_name }}"
+      image: troglobit/inadyn:latest
+      detach: true
+      mounts:
+      - source: "{{ host_directory }}/inadyn.conf"
+        target: /etc/inadyn.conf
+        type: bind
+        read_only: yes
+      restart_policy: unless-stopped

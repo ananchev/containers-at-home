@@ -1,6 +1,0 @@
-[coreos]
-coreos-vm ansible_host=192.168.2.34
-
-[coreos:vars]
-ansible_user = ananchev
-ansible_become = true

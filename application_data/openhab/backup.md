@@ -31,5 +31,5 @@ docker exec -i openhab bash < backup
 
 * After the backup is completed, copy the backup file from the container to the host machine.
 ```shell
-docker cp openhab:/openhab/userdata/backup /mnt/docker/openhab
+cp openhab:/openhab/userdata/backups/backup.tar.gz /mnt/docker/openhab
 ```

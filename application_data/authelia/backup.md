@@ -6,7 +6,7 @@ docker exec -it authelia-redis-1 redis-cli save
 
 * Copy the backup file from the container to the host machine.
 ```shell
-docker cp authelia-redis-1:/data/dump.rdb /mnt/docker/authelia/redis
+docker cp authelia-redis-1:/data/dump.rdb /mnt/docker/authelia
 ```
 
 ## Authelia
@@ -20,5 +20,5 @@ docker exec -it authelia-authelia-1 /bin/sh -c '
 
 * After the backup is completed, copy the backup file from the container to the host machine.
 ```shell
-docker cp authelia-authelia-1:/tmp/backup.tar.gz /mnt/docker/authelia/config
+docker cp authelia-authelia-1:/tmp/backup.tar.gz /mnt/docker/authelia
 ```

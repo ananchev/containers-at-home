@@ -6,7 +6,7 @@
     host_directory: /opt/docker/grafana
     container_name: grafana
     docker_network: influx-grafana
-    local_backup_folder: /Users/ananchev/coreos/application_data/grafana
+    local_backup_folder: "{{ application_data }}/grafana"
   vars_files:
     - ../vault.yml
 

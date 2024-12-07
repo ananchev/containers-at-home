@@ -6,7 +6,7 @@
     host_directory: /opt/docker/openhab
     container_name: openhab
     docker_network: influx-grafana
-    local_backup_folder: /Users/ananchev/coreos/application_data/openhab
+    local_backup_folder: "{{ application_data }}/openhab"
   vars_files:
     - ../vault.yml
 
