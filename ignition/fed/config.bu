@@ -5,30 +5,46 @@ storage:
     - path: /etc/ssh/ssh_host_rsa_key
       mode: 0600
       contents:
-        local: fed/ssh_host_rsa_key
+        local: ssh_host_rsa_key
     - path: /etc/ssh/ssh_host_rsa_key.pub
       mode: 0644
       contents:
-        local: fed/ssh_host_rsa_key.pub
+        local: ssh_host_rsa_key.pub
     - path: /etc/ssh/ssh_host_ecdsa_key
       mode: 0600
       contents:
-        local: fed/ssh_host_ecdsa_key
+        local: ssh_host_ecdsa_key
     - path: /etc/ssh/ssh_host_ecdsa_key.pub
       mode: 0644
       contents:
-        local: fed/ssh_host_ecdsa_key.pub
+        local: ssh_host_ecdsa_key.pub
     - path: /etc/ssh/ssh_host_ed25519_key
       mode: 0600
       contents:
-        local: fed/ssh_host_ed25519_key
+        local: ssh_host_ed25519_key
     - path: /etc/ssh/ssh_host_ed25519_key.pub
       mode: 0644
       contents:
-        local: fed/ssh_host_ed25519_key.pub
+        local: ssh_host_ed25519_key.pub
   links:
     - path: /etc/localtime
       target: ../usr/share/zoneinfo/Europe/Amsterdam
+systemd:
+  units:
+    - name: var-mnt-plex.mount
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Mount plex media drive
+        After=local-fs.target
+        DefaultDependencies=no
+        [Mount]
+        What=/dev/disk/by-uuid/2db36465-dfdc-444a-a87e-0e85937bcb27
+        Where=/var/mnt/plex
+        Type=ext4
+        Options=rw,user,auto
+        [Install]
+        WantedBy=multi-user.target
 passwd:
   users:
     - name: ananchev
