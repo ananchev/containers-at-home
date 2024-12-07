@@ -9,8 +9,8 @@
 
 4. Copy to the host folder the UEFI Firmware images.
 Below source locations are for QEMU installed with homebrew.
-Firmware code: ```/opt/homebrew/opt/qemu/share/qemu/edk2-aarch64-code.fd ```
-Variable data: ```/opt/homebrew/opt/qemu/share/qemu/edk2-arm-vars.fd```
+   - Firmware code: ```/opt/homebrew/opt/qemu/share/qemu/edk2-aarch64-code.fd ```
+   - Variable data: ```/opt/homebrew/opt/qemu/share/qemu/edk2-arm-vars.fd```
 
 5. Shell script to run the vm under [QEMU console](https://github.com/ananchev/qemu-console).
 ```shell
