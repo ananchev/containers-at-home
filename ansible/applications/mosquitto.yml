@@ -1,0 +1,63 @@
+- hosts: coreos
+  become: true 
+  gather_facts: False
+  vars:
+    ansible_python_interpreter: /usr/bin/python # See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html
+    host_directory: /opt/docker/motioneye
+    container_name: mosquitto
+    local_backup_folder: "{{ application_data }}/mosquitto"
+  vars_files:
+    - ../vault.yml
+
+  tasks:
+  - name: Create directory
+    file:
+      path: "{{ item }}"
+      state: directory
+      mode: '0755'
+    loop:
+      - "{{ host_directory }}"
+      - "{{ host_directory }}/data"
+      - "{{ host_directory }}/log"
+
+  - name: Create mosquitto.conf
+    ansible.builtin.copy:
+      content: |
+        persistence true
+        allow_anonymous true
+        persistence_location /mosquitto/data/
+        log_dest file /mosquitto/log/mosquitto.log
+        listener 1883
+      dest: "{{ host_directory }}/mosquitto.conf"
+      mode: '0644'
+    
+  - name: Copy the mosquitto db file from the backup folder
+    ansible.builtin.copy:
+      src: "{{ local_backup_folder }}/mosquitto.db"
+      dest: "{{ host_directory }}/data"
+
+  - name: Add the conf file to selinux_files_to_label
+    set_fact:
+      selinux_files_to_label:
+      - "{{ host_directory }}/mosquitto.conf"
+
+  - name: Configure SELinux
+    ansible.builtin.include_tasks:
+      file: ../_templates/configure_selinux.yml
+
+  - name: Run the container
+    community.docker.docker_container:
+      name: "{{ container_name }}"
+      image: eclipse-mosquitto
+      detach: true
+      ports:
+        - 1883:1883
+      volumes:
+        - "{{ host_directory }}/log:/mosquitto/log:Z"
+        - "{{ host_directory }}/data:/mosquitto/data:Z"
+      mounts:
+      - source: "{{ host_directory }}/mosquitto.conf"
+        target: /mosquitto/config/mosquitto.conf
+        type: bind
+        read_only: yes
+      restart_policy: unless-stopped
