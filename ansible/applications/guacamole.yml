@@ -13,9 +13,12 @@
   tasks:
   - name: Create directory
     file:
-      path: "{{ host_directory }}"
+      path: "{{ item }}"
       state: directory
       mode: '0755'
+    loop: 
+      - "{{ host_directory }}"
+      - "{{ host_directory }}/pgdata"
 
   - name: Copy the db backups to the remote machine
     ansible.builtin.copy:
@@ -41,6 +44,8 @@
       restart_policy: unless-stopped
       env: 
         POSTGRES_PASSWORD: "{{ guacamole_postgres_superuser_pass }}"
+      volumes:
+        - "{{ host_directory }}/pgdata:/var/lib/postgresql/data:Z"
 
   - name: Wait for 5 seconds to secure container is running
     pause:
