@@ -16,7 +16,6 @@
       set_fact:
         host_directory: /opt/docker/authelia/redis
         container_name: authelia-redis
-        local_backup_folder: /Users/ananchev/coreos/application_data/authelia
 
     - name: Create host directory
       file:
