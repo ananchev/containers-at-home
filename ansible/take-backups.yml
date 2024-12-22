@@ -1,8 +1,0 @@
-- hosts: coreos
-  become: true 
-  gather_facts: False
-  vars:
-    ansible_python_interpreter: /usr/bin/python # See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html
-    host_directory: /tmp/backups/
-  vars_files:
-    - vault.yml
