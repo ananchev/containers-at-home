@@ -20,11 +20,6 @@
       - "{{ host_directory }}"
       - "{{ host_directory }}/data"
 
-  - name: Add the host data directory to selinux_dirs_to_label
-    set_fact:
-      selinux_dirs_to_label:
-      - "{{ host_directory }}/data"
-
   - name: Copy the influxdb configuration file
     ansible.builtin.copy:
       src: "{{ local_backup_folder }}/influxdb.conf"
@@ -72,7 +67,7 @@
       ports:
         - "8086:8086"  
       volumes:
-        - "{{ host_directory }}/data:/var/lib/influxdb"
+        - "{{ host_directory }}/data:/var/lib/influxdb:Z"
         - "{{ host_directory }}/influxdb.conf:/etc/influxdb/influxdb.conf:ro"
       restart_policy: unless-stopped
 

@@ -1,0 +1,121 @@
+backup_definitions:
+  - application: zigbee2mqtt
+    container: zigbee2mqtt
+    backup_commands:
+      - tar -czf /tmp/backup.tar.gz -C /app/data .
+    copy_actions:
+      - source_path: /tmp/backup.tar.gz
+        target_filename: backup.tar.gz
+  
+  - application: guacamole
+    container: guacamole-postgres
+    backup_commands:
+      - pg_dumpall -U postgres --globals-only -f /tmp/postgres_globals.sql
+      - pg_dump -U postgres -F p -f /tmp/guacamole_db.sql guacamole_db
+    copy_actions:
+      - source_path: /tmp/postgres_globals.sql
+        target_filename: postgres_globals.sql
+      - source_path: /tmp/guacamole_db.sql
+        target_filename: guacamole_db.sql
+
+  - application: authelia
+    container: authelia
+    backup_commands:
+      - tar -czf /tmp/backup.tar.gz -C /config .
+    copy_actions:
+      - source_path: /tmp/backup.tar.gz
+        target_filename: backup.tar.gz
+
+  - application: authelia
+    container: authelia-redis
+    backup_commands:
+      - redis-cli save
+    copy_actions:
+      - source_path: /data/dump.rdb
+        target_filename: dump.rdb
+
+  - application: grafana
+    container: grafana
+    backup_commands:
+      - tar -czf /tmp/backup.tar.gz -C /var/lib/grafana .
+    copy_actions:
+      - source_path: /tmp/backup.tar.gz
+        target_filename: backup.tar.gz
+
+  - application: influxdb
+    container: influxdb
+    backup_commands:
+      - influxd backup -portable /backup
+      - tar -czf /tmp/backup.tar.gz -C /backup .
+      - cp /etc/influxdb/influxdb.conf /backup/influxdb.conf
+    copy_actions:
+      - source_path: /tmp/backup.tar.gz
+        target_filename: backup.tar.gz
+      - source_path: /backup/influxdb.conf
+        target_filename: influxdb.conf
+
+  - application: mosquitto
+    container: mosquitto
+    backup_commands: []
+    copy_actions:
+      - source_path: /mosquitto/data/mosquitto.db
+        target_filename: mosquitto.db
+
+  # Below is commented out as currently motioneye is not used
+  # - application: motioneye
+  #   container: motioneye
+  #   backup_commands:
+  #     - >
+  #       tar
+  #       --exclude="source"
+  #       --exclude="docker-*"
+  #       --exclude="backup.tar.gz"
+  #       --exclude="Dockerfile"
+  #       -czf /tmp/backup.tar.gz -C /etc/motioneye .
+  #   copy_actions:
+  #     - source_path: /tmp/backup.tar.gz
+  #       target_filename: backup.tar.gz
+
+  - application: nginx-proxy-manager
+    container: nginx-proxy-manager
+    backup_commands:
+      - tar -czf /tmp/backup.tar.gz -C /data -C /etc letsencrypt
+    copy_actions:
+      - source_path: /tmp/backup.tar.gz
+        target_filename: backup.tar.gz
+
+  - application: openhab
+    container: openhab
+    backup_commands:
+      - >
+       tar --verbose
+            --exclude="userdata/backup"
+            --exclude="userdata/tmp"
+            --exclude="userdata/cache"
+            -czf /tmp/backup.tar.gz
+            -C /openhab/userdata/.. userdata
+            -C /openhab/conf/.. conf
+    copy_actions:
+      - source_path: /tmp/backup.tar.gz
+        target_filename: backup.tar.gz
+
+  - application: passbolt
+    container: mariadb-passbolt
+    backup_commands:
+      - mysqldump -u {{ passbolt_mysql_user }} -p{{ passbolt_mysql_pass }} {{ passbolt_mysql_db }} --result-file=/tmp/db_backup.sql
+    copy_actions:
+      - source_path: /tmp/db_backup.sql
+        target_filename: /db_backup.sql
+
+  - application: passbolt
+    container: passbolt
+    backup_commands:
+      - mkdir -p /tmp/backup/cert /tmp/backup/gpg
+      - cp /etc/ssl/certs/certificate.crt /tmp/backup/cert/
+      - cp /etc/ssl/certs/certificate.key /tmp/backup/cert/
+      - cp /etc/passbolt/gpg/serverkey.asc /tmp/backup/gpg/
+      - cp /etc/passbolt/gpg/serverkey_private.asc /tmp/backup/gpg/
+      - tar -czvf /tmp/backup.tar.gz -C /tmp backup
+    copy_actions:
+      - source_path: /tmp/backup.tar.gz
+        target_filename: backup.tar.gz

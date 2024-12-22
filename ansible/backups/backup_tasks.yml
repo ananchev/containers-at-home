@@ -1,0 +1,36 @@
+
+- name: Ensure {{ backup_destination }} directory exists
+  file:
+    path: "{{ backup_destination }}"
+    state: directory
+    mode: '0755'
+
+- name: Run backup commands inside the {{ container }} container
+  community.docker.docker_container_exec:
+    container: "{{ container }}"
+    command: "{{ cmd }}"
+    tty: false
+  loop: "{{ backup_commands }}"
+  loop_control:
+    loop_var: cmd
+
+- name: Copy backup files from container to host machine
+  ansible.builtin.shell: |
+    docker cp {{ container }}:{{ copy_action.source_path }} "{{ backup_destination }}/{{ copy_action.target_filename }}"
+  args:
+    executable: /bin/sh
+  loop: "{{ copy_actions }}"
+  loop_control:
+    loop_var: copy_action
+
+- name: Get size of the backup directory
+  ansible.builtin.shell: du -sh "{{ backup_destination }}" | cut -f1
+  register: backup_size_result
+
+- name: Append backup log entry
+  lineinfile:
+    path: "{{ backups_register }}"
+    create: yes
+    line: >-
+      '{{ application_name }}': backup '{{ backup_timestamp }}': size:'{{ backup_size_result.stdout }}'
+    insertafter: EOF

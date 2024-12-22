@@ -1,0 +1,127 @@
+- hosts: coreos
+  become: true 
+  gather_facts: False
+  vars:
+    ansible_python_interpreter: /usr/bin/python
+  vars_files:
+    - ../vault.yml
+    - backup_definitions.yml
+  tasks:
+    - name: Get current date and time on target host
+      shell: date '+%Y%m%d%H%M%S'
+      register: current_time_result
+
+    - name: Set backup timestamp
+      set_fact:
+        backup_timestamp: "{{ current_time_result.stdout }}"
+
+    - name: Ensure timestamped backup directory exists on the host
+      file:
+        path: "{{ backups_directory }}/{{ backup_timestamp }}"
+        state: directory
+        mode: '0755'
+
+    - name: Backup containers
+      include_tasks: backup_tasks.yml
+      loop: "{{ backup_definitions }}"
+      loop_control:
+        label: "{{ item.application }}"
+      vars:
+        application_name: "{{ item.application }}"
+        container: "{{ item.container }}"
+        backup_commands: "{{ item.backup_commands }}"
+        copy_actions: "{{ item.copy_actions }}"  
+        backup_destination: "{{ backups_directory }}/{{ backup_timestamp }}/{{ application_name }}"
+        
+    - name: Find existing backups
+      find:
+        paths: "{{ backups_directory }}"
+        file_type: directory
+        recurse: no
+        use_regex: true
+        patterns: '[0-9]+'  # Matches directories with names containing one or more digits (timestamp here)
+      register: backup_dirs
+
+    - name: Sort backup directories by name (timestamp) in descending order
+      set_fact:
+        backup_dirs_sorted: "{{ backup_dirs.files | sort(attribute='path', reverse=true) }}" 
+
+    - name: Determine backups to delete - older than the three created last
+      set_fact:
+        backup_dirs_to_delete: "{{ backup_dirs_sorted[3:] }}"
+
+    - name: Extract names of backup directories to delete
+      set_fact:
+        deleted_backup_names: "{{ backup_dirs_to_delete | map(attribute='path') | list }}"
+
+    - name: Remove old backups, keeping the last 3
+      file:
+        path: "{{ old_backup.path }}"
+        state: absent
+      loop: "{{ backup_dirs_to_delete }}"
+      loop_control:
+        loop_var: old_backup
+      when: backup_dirs_to_delete | length > 0
+
+    - name: Append backup log entry
+      lineinfile:
+        path: "{{ backups_register }}"
+        create: yes
+        line: >-
+          deleted old backups: 
+          {%- if deleted_backup_names | length > 0 %}
+            '{{ deleted_backup_names | join(', ') }}'
+          {%- else %}
+            'None'
+          {% endif %}
+        insertafter: EOF
+    
+    - name: Ensure no temporary private key to auth on the backups target host exists
+      file:
+        path: "{{ backups_temporary_private_key_file }}"
+        state: absent
+
+    - name: Create private key file on target host from Ansible Vault variable
+      copy:
+        content: "{{ backup_sftp_private_key }}"
+        dest: "{{ backups_temporary_private_key_file }}"
+        mode: '0600'
+      become: true
+      become_user: ananchev
+
+    - name: Debug backup variables
+      debug:
+        msg:
+          - "Source directory: {{ backups_directory }}"
+          - "Destination directory: {{ backups_target_location }}"
+          - "Private key file: {{ backups_temporary_private_key_file }}"
+          - "Backup user: {{ backup_user }}"
+          - "Backup host: {{ backups_target_host }}"
+
+    - name: Update ownership in {{ backups_directory }} to avoid denials due to permissions inherited when copying from the containers
+      ansible.builtin.file:
+        path: "{{ backups_directory }}"
+        owner: ananchev
+        group: ananchev
+        recurse: yes
+
+    - name: Execute raw rsync command
+      shell: >
+        rsync -avz 
+        --delete 
+        -c 
+        --itemize-changes 
+        -e "ssh -i {{ backups_temporary_private_key_file }} -o StrictHostKeyChecking=no"
+        {{ backups_directory }} 
+        {{ backups_register }}
+        {{ backup_user }}@{{ backups_target_host }}:{{ backups_target_location }}
+    #   register: rsync_result
+
+    # - name: Debug rsync result
+    #   debug:
+    #     var: rsync_result
+
+    - name: Remove temporary private key file from target host
+      file:
+        path: "{{ backups_temporary_private_key_file }}"
+        state: absent

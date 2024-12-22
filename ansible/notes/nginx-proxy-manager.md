@@ -2,7 +2,7 @@
 ```shell
 docker exec -i nginx-proxy-manager /bin/sh -c '
   tar \
-    -czf /tmp/backup.tar.gz -C / data -C /etc letsencrypt
+    -czf /tmp/backup.tar.gz -C /data -C /etc letsencrypt
 '
 ```
 

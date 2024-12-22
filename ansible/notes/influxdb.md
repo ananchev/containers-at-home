@@ -2,7 +2,7 @@
 
 2. Use the InfluxDB influxd backup command to create a backup:
 ```shell
-docker exec influxdb influxd backup -portable backup
+docker exec influxdb influxd backup -portable /backup
 ```
 This stores the backup files into a folder ```backup```. Important to note that the portable backup does not contain any users and privileges definition. These need to be defined again upon restore.
 

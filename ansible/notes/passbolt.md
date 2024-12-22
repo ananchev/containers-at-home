@@ -7,8 +7,6 @@ docker exec -i passbolt-db-1 bash -c \
 Be sure to use simple-quotes for the bash ```-c``` argument to be able to use ```MYSQL_USER```, ```MYSQL_PASSWORD``` and ```MYSQL_DATABASE``` environment variables.
 
 
-
-
 * Backup the server keys and the ssl certificates
 ```shell
 docker exec -i passbolt-passbolt-1 /bin/sh -c '
@@ -26,6 +24,4 @@ tar -czvf /tmp/backup.tar.gz -C /tmp/backup .
 docker cp passbolt-passbolt-1:/tmp/backup.tar.gz /mnt/docker/passbolt \
 && \
 docker cp passbolt-db-1:/tmp/passbolt-db.sql /mnt/docker/passbolt
-```
-
-mysqldump -upassbolt -pP4ssb0lt passbolt > /tmp/passbolt-db.sql         
+```    
