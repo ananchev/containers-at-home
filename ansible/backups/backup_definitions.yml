@@ -45,6 +45,7 @@ backup_definitions:
   - application: influxdb
     container: influxdb
     backup_commands:
+      - rm -rf /backup
       - influxd backup -portable /backup
       - tar -czf /tmp/backup.tar.gz -C /backup .
       - cp /etc/influxdb/influxdb.conf /backup/influxdb.conf
