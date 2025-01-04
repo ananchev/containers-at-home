@@ -1,0 +1,59 @@
+- hosts: coreos
+  become: true 
+  gather_facts: False
+  vars:
+    ansible_python_interpreter: /usr/bin/python # See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html
+    host_directory: /opt/docker/containers-backup-node
+    container_name: containers-backup-node
+  vars_files:
+    - ../vault.yml
+  tasks:
+    - name: Create build directory
+      file:
+        path: "{{ host_directory }}"
+        state: directory
+        mode: '0755'
+    
+    - name: Clone the repository
+      git:
+          repo: 'https://github.com/ananchev/containers-at-home.git' 
+          dest: "{{ host_directory }}"
+
+    - name: Build the image
+      community.docker.docker_image_build:
+        name: backup-node
+        path: "{{ host_directory }}"
+        dockerfile: ansible/backups/Dockerfile
+
+    - name: Run the container
+      community.docker.docker_container:
+        name: "{{ container_name }}"
+        detach: true
+        image: backup-node
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        mounts:
+          - source: /etc/localtime
+            target: /etc/localtime
+            type: bind
+            read_only: yes
+        restart_policy: unless-stopped
+
+    - name: Wait for 5 seconds to secure container is running
+      pause:
+        seconds: 5
+
+    - name: Create the host key used for ansible within the container to initiate connections
+      ansible.builtin.command:
+        docker exec -i {{ container_name }} /bin/sh -c 'echo "{{ coreos_ssh_private_key }}" > /ansible/container_host_ssh.key'
+
+    - name: Change the key file permissions
+      ansible.builtin.command:
+        docker exec -i {{ container_name }} /bin/sh -c 'chmod 600 /ansible/container_host_ssh.key'
+
+    - name: Create vault password file within the container
+      ansible.builtin.command:
+        docker exec -i {{ container_name }} /bin/sh -c 'echo "{{ ansible_vault_pass }}" > /ansible/vault.pass'
+
+    - name: Clean the build cache and non-tagged images
+      ansible.builtin.command: docker system prune -af

@@ -16,6 +16,7 @@
         libselinux-python3 \
         policycoreutils-python-utils \
         cronie \
+        docker-buildx \
         wget
 
     - name: Install requests module with pip

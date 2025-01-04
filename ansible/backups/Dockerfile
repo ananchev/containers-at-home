@@ -9,9 +9,9 @@ RUN apk add --no-cache \
 WORKDIR /ansible
 COPY ansible/ /ansible/
 
-# Touch to create empty files, needed for single file mounts when running the container to work
-RUN touch /ansible/vault.pass
-RUN touch /ansible/backups/ssh_private.key
+## Touch to create empty files, needed the for single file mounts to work when running the container 
+# RUN touch /ansible/vault.pass
+# RUN touch /ansible/backups/ssh_private.key
 
 # Buildkit is required for the heredoc syntax below to work
 COPY <<'EOF' /ansible/backups/run-backup-playbook.sh

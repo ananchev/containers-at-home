@@ -1,1 +1,0 @@
-docker build -f ansible/backups/Dockerfile -t backup-node .
