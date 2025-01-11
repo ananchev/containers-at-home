@@ -9,12 +9,7 @@
   tasks:
 
     - name: Delete all existing backups (contents only)
-      file:
-        path: "{{ backups_directory }}"
-        state: directory
-        mode: '0755'
-        recurse: yes
-        force: yes
+      shell: "rm -rf {{ backups_directory }}/*"
 
     - name: Get current date and time on target host
       shell: date '+%Y%m%d%H%M%S'
