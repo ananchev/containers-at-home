@@ -7,6 +7,15 @@
     - ../vault.yml
     - backup_definitions.yml
   tasks:
+
+    - name: Delete all existing backups (contents only)
+      file:
+        path: "{{ backups_directory }}"
+        state: directory
+        mode: '0755'
+        recurse: yes
+        force: yes
+
     - name: Get current date and time on target host
       shell: date '+%Y%m%d%H%M%S'
       register: current_time_result
@@ -32,49 +41,6 @@
         backup_commands: "{{ item.backup_commands }}"
         copy_actions: "{{ item.copy_actions }}"  
         backup_destination: "{{ backups_directory }}/{{ backup_timestamp }}/{{ application_name }}"
-        
-    - name: Find existing backups
-      find:
-        paths: "{{ backups_directory }}"
-        file_type: directory
-        recurse: no
-        use_regex: true
-        patterns: '[0-9]+'  # Matches directories with names containing one or more digits (timestamp here)
-      register: backup_dirs
-
-    - name: Sort backup directories by name (timestamp) in descending order
-      set_fact:
-        backup_dirs_sorted: "{{ backup_dirs.files | sort(attribute='path', reverse=true) }}" 
-
-    - name: Determine backups to delete - older than the three created last
-      set_fact:
-        backup_dirs_to_delete: "{{ backup_dirs_sorted[3:] }}"
-
-    - name: Extract names of backup directories to delete
-      set_fact:
-        deleted_backup_names: "{{ backup_dirs_to_delete | map(attribute='path') | list }}"
-
-    - name: Remove old backups, keeping the last 3
-      file:
-        path: "{{ old_backup.path }}"
-        state: absent
-      loop: "{{ backup_dirs_to_delete }}"
-      loop_control:
-        loop_var: old_backup
-      when: backup_dirs_to_delete | length > 0
-
-    - name: Append backup log entry
-      lineinfile:
-        path: "{{ backups_register }}"
-        create: yes
-        line: >-
-          deleted old backups: 
-          {%- if deleted_backup_names | length > 0 %}
-            '{{ deleted_backup_names | join(', ') }}'
-          {%- else %}
-            'None'
-          {% endif %}
-        insertafter: EOF
     
     - name: Ensure no temporary private key to auth on the backups target host exists
       file:
@@ -107,8 +73,7 @@
 
     - name: Execute raw rsync command
       shell: >
-        rsync -avz 
-        --delete 
+        rsync -avz  
         -c 
         --itemize-changes 
         -e "ssh -i {{ backups_temporary_private_key_file }} -o StrictHostKeyChecking=no"
