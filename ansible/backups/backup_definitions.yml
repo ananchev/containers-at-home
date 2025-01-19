@@ -120,3 +120,22 @@ backup_definitions:
     copy_actions:
       - source_path: /tmp/backup.tar.gz
         target_filename: backup.tar.gz
+
+  - application: memos
+    container: memos
+    backup_commands:
+      - tar -czf /tmp/backup.tar.gz -C /var/opt/memos/ .
+    copy_actions:
+      - source_path: /tmp/backup.tar.gz
+        target_filename: backup.tar.gz
+
+  - application: memos
+    container: memos-postgres
+    backup_commands:
+      - pg_dumpall -U postgres --globals-only -f /tmp/postgres_globals.sql
+      - pg_dump -U postgres -F p -f /tmp/memos.sql memos
+    copy_actions:
+      - source_path: /tmp/postgres_globals.sql
+        target_filename: postgres_globals.sql
+      - source_path: /tmp/memos.sql
+        target_filename: memos.sql
