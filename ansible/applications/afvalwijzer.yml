@@ -32,8 +32,8 @@
       ansible.builtin.copy:
         content: |
             [telegram]
-            token = {{ afvalwijzer_telegram_token }}
-            chat_id = {{ afvalwijzer_telegram_chat_id }}
+            token = {{ home_notifier_telegram_token }}
+            chat_id = {{ home_notifier_telegram_chat_id }}
         dest: "{{ host_directory }}/source/telegram-send.conf"
         mode: '0644'
 
