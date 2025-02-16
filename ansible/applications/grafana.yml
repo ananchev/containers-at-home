@@ -9,6 +9,7 @@
     local_backup_folder: "{{ application_data }}/grafana"
   vars_files:
     - ../vault.yml
+    - ../app_versions.yml
 
   tasks:
   - name: Create directory
@@ -49,7 +50,7 @@
     community.docker.docker_container:
       name: "{{ container_name }}"
       network_mode: "{{ docker_network }}"
-      image: grafana/grafana
+      image: "{{ app_versions.grafana }}"
       detach: true
       user: "1001:"
       ports:

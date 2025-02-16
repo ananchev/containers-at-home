@@ -9,6 +9,7 @@
     local_backup_folder: "{{ application_data }}/openhab"
   vars_files:
     - ../vault.yml
+    - ../app_versions.yml
 
   tasks:
   - name: Create directory
@@ -31,7 +32,7 @@
   - name: Run the container
     community.docker.docker_container:
       name: "{{ container_name }}"
-      image: openhab/openhab:4.0.4
+      image: "{{app_versions.openhab}}"
       detach: true
       ports:
         - 1234:1234

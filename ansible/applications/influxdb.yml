@@ -9,6 +9,7 @@
     local_backup_folder: "{{ application_data }}/influxdb"
   vars_files:
     - ../vault.yml
+    - ../app_versions.yml
 
   tasks:
   - name: Create directory
@@ -19,6 +20,7 @@
     loop:
       - "{{ host_directory }}"
       - "{{ host_directory }}/data"
+      - "{{ host_directory }}/backup"
 
   - name: Copy the influxdb configuration file
     ansible.builtin.copy:
@@ -31,20 +33,20 @@
       - "{{ host_directory }}/influxdb.conf"
  
   - block:
-    - name: Tar the backup folder on the controller node
-      ansible.builtin.command: >
-        tar -czvf {{ local_backup_folder }}/backup.tar.gz -C {{ local_backup_folder }} backup
-      become: no
-      delegate_to: localhost
-      vars:
-        ansible_python_interpreter: /usr/bin/python3
+    # - name: Tar the backup folder on the controller node
+    #   ansible.builtin.command: >
+    #     tar -czvf {{ local_backup_folder }}/backup.tar.gz -C {{ local_backup_folder }} backup
+    #   become: no
+    #   delegate_to: localhost
+    #   vars:
+    #     ansible_python_interpreter: /usr/bin/python3
     - name: Copy the archive to the remote machine
       ansible.builtin.copy:
         src: "{{ local_backup_folder }}/backup.tar.gz"
         dest: "/tmp"
     - name: Unzip file into the existing folder
       ansible.builtin.command: >
-        tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}
+        tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/backup
       become: true
     when: local_backup_folder is defined and local_backup_folder is not none
 
@@ -63,7 +65,7 @@
       name: "{{ container_name }}"
       network_mode: "{{ docker_network }}"
       detach: true
-      image: influxdb:1.8
+      image: "{{ app_versions['influx-grafana'] }}"
       ports:
         - "8086:8086"  
       volumes:

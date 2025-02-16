@@ -3,11 +3,12 @@
   gather_facts: False
   vars:
     ansible_python_interpreter: /usr/bin/python # See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html
-    host_directory: /opt/docker/motioneye
+    host_directory: /opt/docker/mosquitto
     container_name: mosquitto
     local_backup_folder: "{{ application_data }}/mosquitto"
   vars_files:
     - ../vault.yml
+    - ../app_versions.yml
 
   tasks:
   - name: Create directory
@@ -48,7 +49,7 @@
   - name: Run the container
     community.docker.docker_container:
       name: "{{ container_name }}"
-      image: eclipse-mosquitto
+      image: "{{ app_versions.mosquitto }}"
       detach: true
       ports:
         - 1883:1883

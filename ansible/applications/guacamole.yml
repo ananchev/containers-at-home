@@ -9,6 +9,7 @@
     local_backup_folder: "{{ application_data }}/guacamole"
   vars_files:
     - ../vault.yml
+    - ../app_versions.yml
 
   tasks:
   - name: Create directory
@@ -25,7 +26,7 @@
       src: "{{ local_backup_folder }}/{{ item }}"
       dest: "/tmp"
     loop:
-      - guacamole_db_backup.sql
+      - guacamole_db.sql
       - postgres_globals.sql
 
   - name: Create the docker network for all guacamole containers
@@ -38,7 +39,7 @@
     community.docker.docker_container:
       name: "{{ container_name }}"
       hostname: guacamole-postgres
-      image: postgres:16-alpine
+      image: "{{ app_versions['guacamole-postgres'] }}"
       network_mode: "{{ docker_network }}"
       detach: true
       restart_policy: unless-stopped
@@ -55,7 +56,7 @@
     ansible.builtin.command: 
       docker cp /tmp/{{ item }} {{ container_name }}:/tmp
     loop:
-      - guacamole_db_backup.sql
+      - guacamole_db.sql
       - postgres_globals.sql
 
   - name: Restore global objects (roles, tablespaces)
@@ -69,7 +70,7 @@
 
   - name: Restore the database
     ansible.builtin.command: 
-      docker exec {{ container_name }} psql -U postgres -d guacamole_db -f /tmp/guacamole_db_backup.sql
+      docker exec {{ container_name }} psql -U postgres -d guacamole_db -f /tmp/guacamole_db.sql
 
   - name: Set related variables (Guacd)
     set_fact:

@@ -7,6 +7,7 @@
     container_name: inadyn
   vars_files:
     - ../vault.yml
+    - ../app_versions.yml
 
   tasks:
   - name: Create directory
@@ -46,7 +47,7 @@
   - name: Run the container
     community.docker.docker_container:
       name: "{{ container_name }}"
-      image: troglobit/inadyn:latest
+      image: "{{ app_versions.inadyn }}"
       detach: true
       mounts:
       - source: "{{ host_directory }}/inadyn.conf"

@@ -8,6 +8,7 @@
     local_backup_folder: "{{ application_data }}/nginx-proxy-manager"
   vars_files:
     - ../vault.yml
+    - ../app_versions.yml
 
   tasks:
   - name: Create directory
@@ -33,7 +34,7 @@
     community.docker.docker_container:
       name: "{{ container_name }}"
       detach: true
-      image: jc21/nginx-proxy-manager:latest
+      image: "{{ app_versions['nginx-proxy-manager'] }}"
       ports:
         - "80:80"  # Public HTTP Port
         - "443:443" # Public HTTPS Port

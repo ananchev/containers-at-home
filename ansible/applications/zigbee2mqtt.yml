@@ -8,7 +8,8 @@
     local_backup_folder: "{{ application_data }}/zigbee2mqtt"
   vars_files:
     - ../vault.yml
-
+    - ../app_versions.yml
+    
   tasks:
   - name: Create directory
     file:
@@ -33,7 +34,7 @@
   - name: Run the container
     community.docker.docker_container:
       name: "{{ container_name }}"
-      image: koenkk/zigbee2mqtt
+      image: "{{ app_versions.zigbee2mqtt }}"
       detach: true
       ports:
         - 8070:8080

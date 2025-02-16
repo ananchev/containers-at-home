@@ -8,6 +8,7 @@
     local_backup_folder: "{{ application_data }}/passbolt"
   vars_files:
     - ../vault.yml
+    - ../app_versions.yml
 
   tasks:
   - name: Create directories
@@ -36,13 +37,13 @@
 
     - name: Copy the database dump to remote machine
       ansible.builtin.copy:
-        src: "{{ local_backup_folder }}/passbolt-db.sql"
+        src: "{{ local_backup_folder }}/db_backup.sql"
         dest: "{{ host_directory }}/backup"
 
     - name: Add the database dump to selinux_files_to_label
       set_fact:
         selinux_files_to_label:
-        - "{{ host_directory }}/backup/passbolt-db.sql"
+        - "{{ host_directory }}/backup/db_backup.sql"
 
     - name: Configure SELinux
       ansible.builtin.include_tasks:
@@ -52,12 +53,12 @@
       community.docker.docker_container:
         name: "{{ container_name }}"
         network_mode: "{{ docker_network }}"
-        image: mariadb:10.11
+        image: "{{ app_versions['mariadb-passbolt'] }}"
         detach: true
         volumes:
           - "{{ host_directory }}/mysql-data:/var/lib/mysql:Z"
         mounts:
-          - source: "{{ host_directory }}/backup/passbolt-db.sql"
+          - source: "{{ host_directory }}/backup/db_backup.sql"
             target: /docker-entrypoint-initdb.d/passbolt-db.sql
             type: bind
             read_only: no
@@ -100,12 +101,12 @@
     
     - name: Move the ssl certs from backup directory to the mount directory
       ansible.builtin.command: >  
-        mv {{ host_directory }}/backup/cert {{ host_directory }}
+        mv {{ host_directory }}/backup/backup/cert {{ host_directory }}
       become: true
 
     - name: Move gpg keys from backup directory to the mount directory
       ansible.builtin.command: >  
-        mv {{ host_directory }}/backup/gpg {{ host_directory }}
+        mv {{ host_directory }}/backup/backup/gpg {{ host_directory }}
       become: true
 
     - name: Change gpg keys ownership to container's www-data user uid:gid
@@ -145,7 +146,7 @@
       community.docker.docker_container:
         name: "{{ container_name }}"
         network_mode: "{{ docker_network }}"
-        image: passbolt/passbolt:4.9.1-1-ce
+        image: "{{ app_versions['passbolt'] }}"
         detach: true
         ports:
         - "8082:80"

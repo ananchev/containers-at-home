@@ -9,6 +9,7 @@
     local_backup_folder: "{{ application_data }}/memos"
   vars_files:
     - ../vault.yml
+    - ../app_versions.yml
 
   tasks:
   - name: Create directory
@@ -35,11 +36,11 @@
       driver: bridge
       state: present
 
-  - name: Run the postgres container
+  - name: Run the container
     community.docker.docker_container:
       name: "{{ container_name }}"
       hostname: memos-postgres
-      image: postgres:17-alpine
+      image: "{{ app_versions['memos-postgres'] }}"
       network_mode: "{{ docker_network }}"
       detach: true
       restart_policy: unless-stopped
@@ -90,7 +91,7 @@
     community.docker.docker_container:
       name: "{{ container_name }}"
       detach: true
-      image: neosmemo/memos:stable
+      image: "{{ app_versions['memos'] }}"
       network_mode: "{{ docker_network }}"
       volumes:
         - "{{ host_directory }}/data:/var/opt/memos:Z"
