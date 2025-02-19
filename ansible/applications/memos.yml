@@ -40,7 +40,7 @@
     community.docker.docker_container:
       name: "{{ container_name }}"
       hostname: memos-postgres
-      image: "{{ app_versions['memos-postgres'] }}"
+      image: "{{ app_versions['memos-postgres']['image'] }}"
       network_mode: "{{ docker_network }}"
       detach: true
       restart_policy: unless-stopped
@@ -91,7 +91,7 @@
     community.docker.docker_container:
       name: "{{ container_name }}"
       detach: true
-      image: "{{ app_versions['memos'] }}"
+      image: "{{ app_versions['memos']['image'] }}"
       network_mode: "{{ docker_network }}"
       volumes:
         - "{{ host_directory }}/data:/var/opt/memos:Z"

@@ -47,7 +47,7 @@
   - name: Run the container
     community.docker.docker_container:
       name: "{{ container_name }}"
-      image: "{{ app_versions.inadyn }}"
+      image: "{{ app_versions.inadyn.image }}"
       detach: true
       mounts:
       - source: "{{ host_directory }}/inadyn.conf"

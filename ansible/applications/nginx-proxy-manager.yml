@@ -34,7 +34,7 @@
     community.docker.docker_container:
       name: "{{ container_name }}"
       detach: true
-      image: "{{ app_versions['nginx-proxy-manager'] }}"
+      image: "{{ app_versions['nginx-proxy-manager']['image'] }}"
       ports:
         - "80:80"  # Public HTTP Port
         - "443:443" # Public HTTPS Port

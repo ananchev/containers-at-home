@@ -56,7 +56,7 @@
         hostname: authelia_redis_1
         detach: true
         network_mode: "{{ docker_network }}"
-        image: "{{ app_versions['authelia-redis'] }}"
+        image: "{{ app_versions['authelia-redis']['image'] }}"
         env:
           TZ: Europe/Amsterdam
         mounts:
@@ -122,7 +122,7 @@
         name: "{{ container_name }}"
         detach: true
         network_mode: "{{ docker_network }}"
-        image: "{{ app_versions['authelia'] }}"
+        image: "{{ app_versions['authelia']['image'] }}"
         env:
           TZ: Europe/Amsterdam
         ports:

@@ -32,7 +32,7 @@
   - name: Run the container
     community.docker.docker_container:
       name: "{{ container_name }}"
-      image: "{{app_versions.openhab}}"
+      image: "{{app_versions.openhab.image}}"
       detach: true
       ports:
         - 1234:1234

@@ -65,7 +65,7 @@
       name: "{{ container_name }}"
       network_mode: "{{ docker_network }}"
       detach: true
-      image: "{{ app_versions['influx-grafana'] }}"
+      image: "{{ app_versions['influx-grafana']['image'] }}"
       ports:
         - "8086:8086"  
       volumes:

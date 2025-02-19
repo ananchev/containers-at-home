@@ -49,7 +49,7 @@
   - name: Run the container
     community.docker.docker_container:
       name: "{{ container_name }}"
-      image: "{{ app_versions.mosquitto }}"
+      image: "{{ app_versions.mosquitto.image }}"
       detach: true
       ports:
         - 1883:1883

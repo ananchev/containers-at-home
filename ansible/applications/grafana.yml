@@ -50,7 +50,7 @@
     community.docker.docker_container:
       name: "{{ container_name }}"
       network_mode: "{{ docker_network }}"
-      image: "{{ app_versions.grafana }}"
+      image: "{{ app_versions.grafana.image }}"
       detach: true
       user: "1001:"
       ports:

@@ -39,7 +39,7 @@
     community.docker.docker_container:
       name: "{{ container_name }}"
       hostname: guacamole-postgres
-      image: "{{ app_versions['guacamole-postgres'] }}"
+      image: "{{ app_versions['guacamole-postgres']['image'] }}"
       network_mode: "{{ docker_network }}"
       detach: true
       restart_policy: unless-stopped

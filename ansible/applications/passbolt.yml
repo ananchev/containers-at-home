@@ -53,7 +53,7 @@
       community.docker.docker_container:
         name: "{{ container_name }}"
         network_mode: "{{ docker_network }}"
-        image: "{{ app_versions['mariadb-passbolt'] }}"
+        image: "{{ app_versions['mariadb-passbolt']['image'] }}"
         detach: true
         volumes:
           - "{{ host_directory }}/mysql-data:/var/lib/mysql:Z"
@@ -146,7 +146,7 @@
       community.docker.docker_container:
         name: "{{ container_name }}"
         network_mode: "{{ docker_network }}"
-        image: "{{ app_versions['passbolt'] }}"
+        image: "{{ app_versions['passbolt']['image'] }}"
         detach: true
         ports:
         - "8082:80"
