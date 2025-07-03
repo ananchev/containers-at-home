@@ -82,7 +82,7 @@
         TZ: "Europe/Amsterdam"
         LOG_LEVEL: "info"
         LOG_JSON: "false"
-        DIUN_WATCH_SCHEDULE: "0 20 * * 4"
+        DIUN_WATCH_SCHEDULE: "0 20 * * */4"
         DIUN_WATCH_JITTER: "30s"
         DIUN_WATCH_FIRSTCHECKNOTIF: "false"
         DIUN_PROVIDERS_DOCKER: "false"
