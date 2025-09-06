@@ -93,6 +93,7 @@ backup_definitions:
             --exclude="userdata/backup"
             --exclude="userdata/tmp"
             --exclude="userdata/cache"
+            --exclude="userdata/logs"
             -czf /tmp/backup.tar.gz
             -C /openhab/userdata/.. userdata
             -C /openhab/conf/.. conf
