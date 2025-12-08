@@ -104,7 +104,7 @@ backup_definitions:
   - application: passbolt
     container: mariadb-passbolt
     backup_commands:
-      - mysqldump -u {{ passbolt_mysql_user }} -p{{ passbolt_mysql_pass }} {{ passbolt_mysql_db }} --result-file=/tmp/db_backup.sql
+      - mariadb-dump -u {{ passbolt_mysql_user }} -p{{ passbolt_mysql_pass }} {{ passbolt_mysql_db }} --result-file=/tmp/db_backup.sql
     copy_actions:
       - source_path: /tmp/db_backup.sql
         target_filename: /db_backup.sql
