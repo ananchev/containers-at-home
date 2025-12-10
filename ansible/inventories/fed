@@ -1,2 +1,5 @@
 [coreos]
 fed ansible_host=192.168.2.8
+
+[backup-storage]
+unas ansible_host=192.168.2.2
