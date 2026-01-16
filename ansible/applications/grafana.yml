@@ -1,8 +1,7 @@
-- hosts: coreos
+- hosts: homelab
   become: true 
   gather_facts: False
   vars:
-    ansible_python_interpreter: /usr/bin/python # See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html
     host_directory: /opt/docker/grafana
     container_name: grafana
     docker_network: influx-grafana

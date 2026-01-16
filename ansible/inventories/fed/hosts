@@ -1,0 +1,5 @@
+[homelab]
+fed ansible_host=192.168.2.8
+
+[coreos]
+fed

@@ -1,0 +1,9 @@
+- hosts: unraid
+  gather_facts: False
+  vars_files:
+    - vault.yml
+
+  tasks:
+    - name: Placeholder for Unraid pre-requisites
+      debug:
+        msg: "Add Unraid-specific setup tasks here (e.g., install packages, configure Docker)"

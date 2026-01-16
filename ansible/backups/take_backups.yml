@@ -1,8 +1,7 @@
-- hosts: coreos
+- hosts: homelab
   become: true 
   gather_facts: False
   vars:
-    ansible_python_interpreter: /usr/bin/python
   vars_files:
     - ../vault.yml
     - backup_definitions.yml

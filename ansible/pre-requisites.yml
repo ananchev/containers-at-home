@@ -1,46 +1,12 @@
-- hosts: coreos
+- hosts: homelab
   gather_facts: False
   vars_files:
     - vault.yml
-  vars:
-    ansible_python_interpreter: /usr/bin/python3 # See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html
 
   tasks:
-    - name: Install python3 and related packages
-      raw: |
-        test -e /usr/bin/python3 || sudo /usr/bin/rpm-ostree install -y \
-        --apply-live \
-        --allow-inactive \
-        python3 \
-        python3-pip \
-        libselinux-python3 \
-        policycoreutils-python-utils \
-        cronie \
-        docker-buildx \
-        wget
-
-    - name: Install requests module with pip system-wide
-      shell: sudo python3 -m pip install requests
-      args:
-        _uses_shell: true # run in a shell environment
-
-    - name: Ensure Docker is started and enabled at boot
-      ansible.builtin.systemd:
-        name: docker
-        state: started
-        enabled: yes
-
-    # - name: Download HetrixTools server monitoring agent
-    #   ansible.builtin.get_url:
-    #     url: https://raw.githubusercontent.com/hetrixtools/agent/master/hetrixtools_install.sh
-    #     dest: /tmp/hetrixtools_install.sh
-    #     mode: '0755'
-
-    # - name: Install HetrixTools server monitoring agent
-    #   ansible.builtin.shell: >
-    #     /tmp/hetrixtools_install.sh {{ hetrix_monitoring_agent_uid }} 1 docker,ssh 0 0 1 0
-    #   args:
-    #     executable: /bin/bash
+    - name: Run OS-specific pre-requisites
+      debug:
+        msg: "Use pre-requisites-coreos.yml for CoreOS hosts or pre-requisites-unraid.yml for Unraid"
 
     # - name: Unconditionally reboot the machine with all defaults
     #   ansible.builtin.reboot:

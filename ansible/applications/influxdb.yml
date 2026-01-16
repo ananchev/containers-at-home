@@ -1,8 +1,7 @@
-- hosts: coreos
+- hosts: homelab
   become: true 
   gather_facts: False
   vars:
-    ansible_python_interpreter: /usr/bin/python # See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html
     host_directory: /opt/docker/influxdb
     container_name: influxdb
     docker_network: influx-grafana
@@ -39,7 +38,6 @@
     #   become: no
     #   delegate_to: localhost
     #   vars:
-    #     ansible_python_interpreter: /usr/bin/python3
     - name: Copy the archive to the remote machine
       ansible.builtin.copy:
         src: "{{ local_backup_folder }}/backup.tar.gz"
