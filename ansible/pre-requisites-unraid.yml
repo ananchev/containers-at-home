@@ -4,6 +4,7 @@
     - vault.yml
 
   tasks:
-    - name: Placeholder for Unraid pre-requisites
-      debug:
-        msg: "Add Unraid-specific setup tasks here (e.g., install packages, configure Docker)"
+    - name: Install requests module with pip system-wide
+      shell: sudo python3 -m pip install requests
+      args:
+        _uses_shell: true # run in a shell environment

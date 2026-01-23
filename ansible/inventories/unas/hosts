@@ -1,0 +1,5 @@
+[homelab]
+unas ansible_host=192.168.2.2
+
+[unraid]
+unas

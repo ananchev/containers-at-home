@@ -2,185 +2,187 @@
   become: true 
   gather_facts: False
   vars:
-    host_directory: /opt/docker/passbolt
-    docker_network: passbolt-net
-    local_backup_folder: "{{ application_data }}/passbolt"
-  vars_files:
-    - ../vault.yml
-    - ../app_versions.yml
+    application: passbolt
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    docker_network: "{{ application }}-net"
+    local_backup_folder: "{{ application_data }}/{{ application }}"
 
   tasks:
-  - name: Create directories
-    file:
-      path: "{{ item }}"
-      state: directory
-      mode: '0755'
-    loop:
-      - "{{ host_directory }}"
-      - "{{ host_directory }}/backup"
-      - "{{ host_directory }}/mysql-data"
-      - "{{ host_directory }}/gpg"
-      - "{{ host_directory }}/jwt"
+    - name: Run only on the on the designated host
+      block:
+      - name: Create directories
+        file:
+          path: "{{ item }}"
+          state: directory
+          mode: '0755'
+        loop:
+          - "{{ host_directory }}"
+          - "{{ host_directory }}/backup"
+          - "{{ host_directory }}/mysql-data"
+          - "{{ host_directory }}/gpg"
+          - "{{ host_directory }}/jwt"
 
-  - name: Create the common network for passbolt
-    community.docker.docker_network:
-      name: "{{ docker_network }}"
-      driver: bridge
-      state: present
+      - name: Create the common network for passbolt
+        community.docker.docker_network:
+          name: "{{ docker_network }}"
+          driver: bridge
+          state: present
 
-  - name: Deploy the maria-db container
-    block:
-    - name: Set a fact with maria-db container name
-      set_fact:
-        container_name: mariadb-passbolt
+      - name: Deploy the maria-db container
+        block:
+        - name: Set a fact with maria-db container name
+          set_fact:
+            container_name: mariadb-passbolt
 
-    - name: Copy the database dump to remote machine
-      ansible.builtin.copy:
-        src: "{{ local_backup_folder }}/db_backup.sql"
-        dest: "{{ host_directory }}/backup"
+        - name: Copy the database dump to remote machine
+          ansible.builtin.copy:
+            src: "{{ local_backup_folder }}/db_backup.sql"
+            dest: "{{ host_directory }}/backup"
 
-    - name: Add the database dump to selinux_files_to_label
-      set_fact:
-        selinux_files_to_label:
-        - "{{ host_directory }}/backup/db_backup.sql"
+        - name: Add the database dump to selinux_files_to_label
+          set_fact:
+            selinux_files_to_label:
+            - "{{ host_directory }}/backup/db_backup.sql"
 
-    - name: Configure SELinux
-      ansible.builtin.include_tasks:
-        file: ../_templates/configure_selinux.yml
+        - name: Configure SELinux
+          ansible.builtin.include_tasks:
+            file: ../_templates/configure_selinux.yml
 
-    - name: Run the maria-db container
-      community.docker.docker_container:
-        name: "{{ container_name }}"
-        network_mode: "{{ docker_network }}"
-        image: "{{ app_versions['mariadb-passbolt']['image'] }}"
-        detach: true
-        volumes:
-          - "{{ host_directory }}/mysql-data:/var/lib/mysql:Z"
-        mounts:
-          - source: "{{ host_directory }}/backup/db_backup.sql"
-            target: /docker-entrypoint-initdb.d/passbolt-db.sql
-            type: bind
-            read_only: no
-        restart_policy: unless-stopped
-        env:
-          MYSQL_RANDOM_ROOT_PASSWORD: "true"
-          MYSQL_DATABASE: "{{ passbolt_mysql_db }}"
-          MYSQL_USER: "{{ passbolt_mysql_user }}"
-          MYSQL_PASSWORD: "{{ passbolt_mysql_pass }}"
+        - name: Run the maria-db container
+          community.docker.docker_container:
+            name: "{{ container_name }}"
+            network_mode: "{{ docker_network }}"
+            image: "{{ app_versions['mariadb-passbolt']['image'] }}"
+            detach: true
+            volumes:
+              - "{{ host_directory }}/mysql-data:/var/lib/mysql:Z"
+            mounts:
+              - source: "{{ host_directory }}/backup/db_backup.sql"
+                target: /docker-entrypoint-initdb.d/passbolt-db.sql
+                type: bind
+                read_only: no
+            restart_policy: unless-stopped
+            env:
+              MYSQL_RANDOM_ROOT_PASSWORD: "true"
+              MYSQL_DATABASE: "{{ passbolt_mysql_db }}"
+              MYSQL_USER: "{{ passbolt_mysql_user }}"
+              MYSQL_PASSWORD: "{{ passbolt_mysql_pass }}"
 
-    - name: Get details of the maria-db container
-      community.docker.docker_container_info:
-        name: "{{ container_name }}"
-      register: mysql_container_info
+        - name: Get details of the maria-db container
+          community.docker.docker_container_info:
+            name: "{{ container_name }}"
+          register: mysql_container_info
 
-  - name: Deploy the passbolt container
-    block:
-    - name: Set a fact with the passbolt container name
-      set_fact:
-        container_name: passbolt
+      - name: Deploy the passbolt container
+        block:
+        - name: Set a fact with the passbolt container name
+          set_fact:
+            container_name: passbolt
 
-    - name: Wait 10s to secure maria-db container is running
-      wait_for:
-        host: "{{ mysql_container_info.container.NetworkSettings.Networks[docker_network].IPAddress }}"
-        port: "3306"
-        state: started
-        delay: 10
-        timeout: 60
-        sleep: 5
+        - name: Wait 10s to secure maria-db container is running
+          wait_for:
+            host: "{{ mysql_container_info.container.NetworkSettings.Networks[docker_network].IPAddress }}"
+            port: "3306"
+            state: started
+            delay: 10
+            timeout: 60
+            sleep: 5
 
-    - name: Copy the backup archive with server gpg keys & the ssl certs to the remote machine
-      ansible.builtin.copy:
-        src: "{{ local_backup_folder }}/backup.tar.gz"
-        dest: "/tmp"
+        - name: Copy the backup archive with server gpg keys & the ssl certs to the remote machine
+          ansible.builtin.copy:
+            src: "{{ local_backup_folder }}/backup.tar.gz"
+            dest: "/tmp"
 
-    - name: Unzip the archive
-      ansible.builtin.command: >
-        tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/backup
-      become: true
-    
-    - name: Move the ssl certs from backup directory to the mount directory
-      ansible.builtin.command: >  
-        mv {{ host_directory }}/backup/backup/cert {{ host_directory }}
-      become: true
+        - name: Unzip the archive
+          ansible.builtin.command: >
+            tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/backup
+          become: true
+        
+        - name: Move the ssl certs from backup directory to the mount directory
+          ansible.builtin.command: >  
+            mv {{ host_directory }}/backup/backup/cert {{ host_directory }}
+          become: true
 
-    - name: Move gpg keys from backup directory to the mount directory
-      ansible.builtin.command: >  
-        mv {{ host_directory }}/backup/backup/gpg {{ host_directory }}
-      become: true
+        - name: Move gpg keys from backup directory to the mount directory
+          ansible.builtin.command: >  
+            mv {{ host_directory }}/backup/backup/gpg {{ host_directory }}
+          become: true
 
-    - name: Change gpg keys ownership to container's www-data user uid:gid
-      ansible.builtin.command: >  
-        chown 33:33 {{ host_directory }}/gpg/{{ item }}
-      become: true
-      loop:
-        - serverkey.asc
-        - serverkey_private.asc
+        - name: Change gpg keys ownership to container's www-data user uid:gid
+          ansible.builtin.command: >  
+            chown 33:33 {{ host_directory }}/gpg/{{ item }}
+          become: true
+          loop:
+            - serverkey.asc
+            - serverkey_private.asc
 
-    - name: Change gpg keys permissions
-      ansible.builtin.command: >  
-        chmod 0440 {{ host_directory }}/gpg/{{ item }}
-      become: true
-      loop:
-        - serverkey.asc
-        - serverkey_private.asc
+        - name: Change gpg keys permissions
+          ansible.builtin.command: >  
+            chmod 0440 {{ host_directory }}/gpg/{{ item }}
+          become: true
+          loop:
+            - serverkey.asc
+            - serverkey_private.asc
 
-    - name: Set selinux_files_to_label for the ssl certs and gpg keys
-      set_fact:
-        selinux_files_to_label:
-          - "{{ host_directory }}/cert/certificate.crt"
-          - "{{ host_directory }}/cert/certificate.key"
-          - "{{ host_directory }}/gpg/serverkey.asc"
-          - "{{ host_directory }}/gpg/serverkey_private.asc"
-    
-    - name: Configure SELinux
-      ansible.builtin.include_tasks:
-        file: ../_templates/configure_selinux.yml
+        - name: Set selinux_files_to_label for the ssl certs and gpg keys
+          set_fact:
+            selinux_files_to_label:
+              - "{{ host_directory }}/cert/certificate.crt"
+              - "{{ host_directory }}/cert/certificate.key"
+              - "{{ host_directory }}/gpg/serverkey.asc"
+              - "{{ host_directory }}/gpg/serverkey_private.asc"
+        
+        - name: Configure SELinux
+          ansible.builtin.include_tasks:
+            file: ../_templates/configure_selinux.yml
 
-    - name: Change jwt folder ownership to container's www-data user uid:gid
-      ansible.builtin.command: >  
-        chown 33:33 {{ host_directory }}/jwt
-      become: true
+        - name: Change jwt folder ownership to container's www-data user uid:gid
+          ansible.builtin.command: >  
+            chown 33:33 {{ host_directory }}/jwt
+          become: true
 
-    - name: Run the passbolt container
-      community.docker.docker_container:
-        name: "{{ container_name }}"
-        network_mode: "{{ docker_network }}"
-        image: "{{ app_versions['passbolt']['image'] }}"
-        detach: true
-        ports:
-        - "8082:80"
-        - "4433:443"
-        volumes:
-          - "{{ host_directory }}/jwt:/etc/passbolt/jwt:Z"
-          - "{{ host_directory }}/gpg:/etc/passbolt/gpg:Z"
-        mounts:
-          - source: "{{ host_directory }}/cert/certificate.crt"
-            target: /etc/ssl/certs/certificate.crt
-            type: bind
-            read_only: yes
-          - source: "{{ host_directory }}/cert/certificate.key"
-            target: /etc/ssl/certs/certificate.key
-            type: bind
-            read_only: yes
-        restart_policy: unless-stopped
-        env:
-          APP_FULL_BASE_URL: "{{ passbolt_app_full_base_url }}"
-          DATASOURCES_DEFAULT_HOST: "{{ mysql_container_info.container.NetworkSettings.Networks[docker_network].DNSNames[0] }}"
-          DATASOURCES_DEFAULT_DATABASE: "{{ passbolt_mysql_db }}"
-          DATASOURCES_DEFAULT_USERNAME: "{{ passbolt_mysql_user }}"
-          DATASOURCES_DEFAULT_PASSWORD: "{{ passbolt_mysql_pass }}"
-          PASSBOLT_SSL_FORCE: "true"
-          PASSBOLT_SECURITY_SMTP_SETTINGS_ENDPOINTS_DISABLED: "false"
-          PASSBOLT_GPG_SERVER_KEY_FINGERPRINT: "{{ passbolt_gpg_server_key_fingerprint }}"
-          PASSBOLT_KEY_EMAIL: "{{ passbolt_key_email }}"
-        command: >
-          /usr/bin/wait-for.sh -t 0 {{ mysql_container_info.container.NetworkSettings.Networks[docker_network].DNSNames[0] }}:3306 -- /docker-entrypoint.sh
+        - name: Run the passbolt container
+          community.docker.docker_container:
+            name: "{{ container_name }}"
+            network_mode: "{{ docker_network }}"
+            image: "{{ app_versions['passbolt']['image'] }}"
+            detach: true
+            ports:
+            - "8082:80"
+            - "4433:443"
+            volumes:
+              - "{{ host_directory }}/jwt:/etc/passbolt/jwt:Z"
+              - "{{ host_directory }}/gpg:/etc/passbolt/gpg:Z"
+            mounts:
+              - source: "{{ host_directory }}/cert/certificate.crt"
+                target: /etc/ssl/certs/certificate.crt
+                type: bind
+                read_only: yes
+              - source: "{{ host_directory }}/cert/certificate.key"
+                target: /etc/ssl/certs/certificate.key
+                type: bind
+                read_only: yes
+            restart_policy: unless-stopped
+            env:
+              APP_FULL_BASE_URL: "{{ passbolt_app_full_base_url }}"
+              DATASOURCES_DEFAULT_HOST: "{{ mysql_container_info.container.NetworkSettings.Networks[docker_network].DNSNames[0] }}"
+              DATASOURCES_DEFAULT_DATABASE: "{{ passbolt_mysql_db }}"
+              DATASOURCES_DEFAULT_USERNAME: "{{ passbolt_mysql_user }}"
+              DATASOURCES_DEFAULT_PASSWORD: "{{ passbolt_mysql_pass }}"
+              PASSBOLT_SSL_FORCE: "true"
+              PASSBOLT_SECURITY_SMTP_SETTINGS_ENDPOINTS_DISABLED: "false"
+              PASSBOLT_GPG_SERVER_KEY_FINGERPRINT: "{{ passbolt_gpg_server_key_fingerprint }}"
+              PASSBOLT_KEY_EMAIL: "{{ passbolt_key_email }}"
+            command: >
+              /usr/bin/wait-for.sh -t 0 {{ mysql_container_info.container.NetworkSettings.Networks[docker_network].DNSNames[0] }}:3306 -- /docker-entrypoint.sh
 
-    # - name: Get the www-data uid and gid in the passbolt container
-    #   command: docker exec passbolt sh -c "id www-data"
-    #   register: id_output
+        # - name: Get the www-data uid and gid in the passbolt container
+        #   command: docker exec passbolt sh -c "id www-data"
+        #   register: id_output
 
-    # - name: Parse UID and GID from the output
-    #   set_fact:
-    #     uid: "{{ id_output.stdout | regex_search('uid=([0-9]+)', '\\1') | int }}"
-    #     gid: "{{ id_output.stdout | regex_search('gid=([0-9]+)', '\\1') | int }}"
+        # - name: Parse UID and GID from the output
+        #   set_fact:
+        #     uid: "{{ id_output.stdout | regex_search('uid=([0-9]+)', '\\1') | int }}"
+        #     gid: "{{ id_output.stdout | regex_search('gid=([0-9]+)', '\\1') | int }}"
+
+      when: inventory_hostname in application_hosts['passbolt']

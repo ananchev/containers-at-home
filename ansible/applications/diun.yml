@@ -2,102 +2,103 @@
   become: true 
   gather_facts: true
   vars:
-    host_directory: /opt/docker/diun
-    container_name: diun
-  vars_files:
-    - ../vault.yml
-    - ../app_versions.yml
+    application: diun
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    container_name: "{{ application }}"
 
   tasks:
-  - name: Create directories
-    file:
-      path: "{{ item }}"
-      state: directory
-      mode: '0755'
-    loop:
-      - "{{ host_directory }}"
-      - "{{ host_directory }}/data"
+    - name: Run only on the on the designated host
+      block:
+      - name: Create directories
+        file:
+          path: "{{ item }}"
+          state: directory
+          mode: '0755'
+        loop:
+          - "{{ host_directory }}"
+          - "{{ host_directory }}/data"
 
-  - name: Extract image names and versions
-    set_fact:
-      images_with_versions: >-
-        {{ images_with_versions + [
-          {
-            'name': (i.value.image.split(':'))[0], 
-            'version': (i.value.image.split(':'))[1], 
-            'include_tags': i.value.diun_include_pattern
-          }
-        ] }}
-    vars:
-      images_with_versions: []
-    loop: "{{ app_versions | dict2items }}"
-    loop_control:
-      loop_var: i
+      - name: Extract image names and versions
+        set_fact:
+          images_with_versions: >-
+            {{ images_with_versions + [
+              {
+                'name': (i.value.image.split(':'))[0], 
+                'version': (i.value.image.split(':'))[1], 
+                'include_tags': i.value.diun_include_pattern
+              }
+            ] }}
+        vars:
+          images_with_versions: []
+        loop: "{{ app_versions | dict2items }}"
+        loop_control:
+          loop_var: i
 
-  - name: Delete existing watchlist.yml
-    ansible.builtin.file:
-      path: "{{ host_directory }}/watchlist.yml"
-      state: absent
+      - name: Delete existing watchlist.yml
+        ansible.builtin.file:
+          path: "{{ host_directory }}/watchlist.yml"
+          state: absent
 
-  - name: Append each image with version to watchlist.yml
-    ansible.builtin.lineinfile:
-      path: "{{ host_directory }}/watchlist.yml"
-      line: |
-        - name: {{ item.name }}
-          include_tags:
-            - {{ item.include_tags }}
-          metadata:
-            current_version: {{ item.version }}
-      create: yes
-    loop: "{{ images_with_versions }}"
+      - name: Append each image with version to watchlist.yml
+        ansible.builtin.lineinfile:
+          path: "{{ host_directory }}/watchlist.yml"
+          line: |
+            - name: {{ item.name }}
+              include_tags:
+                - {{ item.include_tags }}
+              metadata:
+                current_version: {{ item.version }}
+          create: yes
+        loop: "{{ images_with_versions }}"
 
-  - name: Add the watchlist file to selinux_files_to_label
-    set_fact:
-      selinux_files_to_label:
-      - "{{ host_directory }}/watchlist.yml"
+      - name: Add the watchlist file to selinux_files_to_label
+        set_fact:
+          selinux_files_to_label:
+          - "{{ host_directory }}/watchlist.yml"
 
-  - name: Configure SELinux
-    ansible.builtin.include_tasks:
-      file: ../_templates/configure_selinux.yml
+      - name: Configure SELinux
+        ansible.builtin.include_tasks:
+          file: ../_templates/configure_selinux.yml
 
-  - name: Run diun
-    community.docker.docker_container:
-      name: "{{ container_name }}"
-      detach: true
-      image: "{{ app_versions.diun.image }}"
-      mounts:
-      - source: /var/run/docker.sock
-        target: /var/run/docker.sock
-        type: bind
-        read_only: yes
-      - source: "{{ host_directory }}/watchlist.yml"
-        target: /watchlist.yml
-        type: bind
-        read_only: yes
-      volumes:
-        - "{{ host_directory }}/data:/data:Z"
-      restart_policy: unless-stopped
-      env:
-        TZ: "Europe/Amsterdam"
-        LOG_LEVEL: "info"
-        LOG_JSON: "false"
-        DIUN_WATCH_SCHEDULE: "0 20 * * */4"
-        DIUN_WATCH_JITTER: "30s"
-        DIUN_WATCH_FIRSTCHECKNOTIF: "false"
-        DIUN_PROVIDERS_DOCKER: "false"
-        DIUN_PROVIDERS_FILE_FILENAME: "/watchlist.yml"
-        DIUN_DEFAULTS_WATCHREPO: "true"
-        DIUN_DEFAULTS_NOTIFYON: "new"
-        DIUN_DEFAULTS_MAXTAGS: "1"
-        DIUN_DEFAULTS_SORTTAGS: "semver"
-        DIUN_NOTIF_TELEGRAM_TOKEN: "{{ home_notifier_telegram_token }}"
-        DIUN_NOTIF_TELEGRAM_CHATIDS: "{{ home_notifier_telegram_chat_id }}"
-        DIUN_NOTIF_TELEGRAM_TEMPLATEBODY: >-
-          {% raw %}
-          New image found for {{ if .Entry.Image.HubLink }}
-            [{{ .Entry.Image }}]({{ .Entry.Image.HubLink }})
-          {{ else }}
-            {{ .Entry.Image }}
-          {{ end }}
-          Currently running  `{{ .Entry.Metadata.current_version }}`
-          {% endraw %}
+      - name: Run diun
+        community.docker.docker_container:
+          name: "{{ container_name }}"
+          detach: true
+          image: "{{ app_versions.diun.image }}"
+          mounts:
+          - source: /var/run/docker.sock
+            target: /var/run/docker.sock
+            type: bind
+            read_only: yes
+          - source: "{{ host_directory }}/watchlist.yml"
+            target: /watchlist.yml
+            type: bind
+            read_only: yes
+          volumes:
+            - "{{ host_directory }}/data:/data:Z"
+          restart_policy: unless-stopped
+          env:
+            TZ: "Europe/Amsterdam"
+            LOG_LEVEL: "info"
+            LOG_JSON: "false"
+            DIUN_WATCH_SCHEDULE: "0 20 * * */4"
+            DIUN_WATCH_JITTER: "30s"
+            DIUN_WATCH_FIRSTCHECKNOTIF: "false"
+            DIUN_PROVIDERS_DOCKER: "false"
+            DIUN_PROVIDERS_FILE_FILENAME: "/watchlist.yml"
+            DIUN_DEFAULTS_WATCHREPO: "true"
+            DIUN_DEFAULTS_NOTIFYON: "new"
+            DIUN_DEFAULTS_MAXTAGS: "1"
+            DIUN_DEFAULTS_SORTTAGS: "semver"
+            DIUN_NOTIF_TELEGRAM_TOKEN: "{{ home_notifier_telegram_token }}"
+            DIUN_NOTIF_TELEGRAM_CHATIDS: "{{ home_notifier_telegram_chat_id }}"
+            DIUN_NOTIF_TELEGRAM_TEMPLATEBODY: >-
+              {% raw %}
+              New image found for {{ if .Entry.Image.HubLink }}
+                [{{ .Entry.Image }}]({{ .Entry.Image.HubLink }})
+              {{ else }}
+                {{ .Entry.Image }}
+              {{ end }}
+              Currently running  `{{ .Entry.Metadata.current_version }}`
+              {% endraw %}
+      when: inventory_hostname in application_hosts['diun']   

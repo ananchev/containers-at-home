@@ -2,60 +2,61 @@
   become: true 
   gather_facts: False
   vars:
-    host_directory: /opt/docker/grafana
-    container_name: grafana
+    application: grafana
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    container_name: "{{ application }}"
     docker_network: influx-grafana
-    local_backup_folder: "{{ application_data }}/grafana"
-  vars_files:
-    - ../vault.yml
-    - ../app_versions.yml
+    local_backup_folder: "{{ application_data }}/{{ application }}"
 
   tasks:
-  - name: Create directory
-    file:
-      path: "{{ item }}"
-      state: directory
-      mode: '0755'
-    loop:
-      - "{{ host_directory }}"
-      - "{{ host_directory }}/data"
+    - name: Run only on the on the designated host
+      block:
+      - name: Create directory
+        file:
+          path: "{{ item }}"
+          state: directory
+          mode: '0755'
+        loop:
+          - "{{ host_directory }}"
+          - "{{ host_directory }}/data"
 
-  - block:
-    - name: Copy the archive to the remote machine
-      ansible.builtin.copy:
-        src: "{{ local_backup_folder }}/backup.tar.gz"
-        dest: "/tmp"
-    - name: Unzip file into the existing folder
-      ansible.builtin.command: >
-        tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/data
-      become: true
+      - block:
+        - name: Copy the archive to the remote machine
+          ansible.builtin.copy:
+            src: "{{ local_backup_folder }}/backup.tar.gz"
+            dest: "/tmp"
+        - name: Unzip file into the existing folder
+          ansible.builtin.command: >
+            tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/data
+          become: true
 
-    - name: Change ownership recursively of the data directory
-      ansible.builtin.file:
-        path: "{{ host_directory }}/data"
-        owner: "{{ ansible_user }}"
-        group: "{{ ansible_user }}"
-        recurse: true
-      become: true
-    when: local_backup_folder is defined and local_backup_folder is not none
+        - name: Change ownership recursively of the data directory
+          ansible.builtin.file:
+            path: "{{ host_directory }}/data"
+            owner: "{{ ansible_user }}"
+            group: "{{ ansible_user }}"
+            recurse: true
+          become: true
+        when: local_backup_folder is defined and local_backup_folder is not none
 
-  - name: Create the common network to use with grafana container
-    community.docker.docker_network:
-      name: "{{ docker_network }}"
-      driver: bridge
-      state: present
+      - name: Create the common network to use with grafana container
+        community.docker.docker_network:
+          name: "{{ docker_network }}"
+          driver: bridge
+          state: present
 
-  - name: Run the container
-    community.docker.docker_container:
-      name: "{{ container_name }}"
-      network_mode: "{{ docker_network }}"
-      image: "{{ app_versions.grafana.image }}"
-      detach: true
-      user: "1001:"
-      ports:
-        - 3000:3000
-      volumes:
-        - "{{ host_directory }}/data:/var/lib/grafana:Z"
-      restart_policy: unless-stopped
-      env:
-        GF_INSTALL_PLUGINS: "marcusolsson-dynamictext-panel"
+      - name: Run the container
+        community.docker.docker_container:
+          name: "{{ container_name }}"
+          network_mode: "{{ docker_network }}"
+          image: "{{ app_versions.grafana.image }}"
+          detach: true
+          user: "1001:"
+          ports:
+            - 3000:3000
+          volumes:
+            - "{{ host_directory }}/data:/var/lib/grafana:Z"
+          restart_policy: unless-stopped
+          env:
+            GF_INSTALL_PLUGINS: "marcusolsson-dynamictext-panel"
+      when: inventory_hostname in application_hosts['grafana']

@@ -2,63 +2,65 @@
   become: true 
   gather_facts: False
   vars:
-    host_directory: /opt/docker/energy-meters
-    container_name: energy-meters
+    application: energy-meters
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    container_name: "{{ application }}"
     selinux_files_to_label:
     - "{{ host_directory }}/readings_cache.json"
-  vars_files:
-    - ../vault.yml
 
   tasks:
-    - name: Create build directory
-      file:
-        path: "{{ item }}"
-        state: directory
-        mode: '0755'
-      loop: 
-        - "{{ host_directory }}"
-        - "{{ host_directory }}/applog"
-    
-    - name: Clone the repository
-      git:
-          repo: 'https://github.com/ananchev/energymeter.git' 
-          dest: "{{ host_directory }}/source"
+    - name: Run only on the on the designated host
+      block:
+      - name: Create build directory
+        file:
+          path: "{{ item }}"
+          state: directory
+          mode: '0755'
+        loop: 
+          - "{{ host_directory }}"
+          - "{{ host_directory }}/applog"
+      
+      - name: Clone the repository
+        git:
+            repo: 'https://github.com/ananchev/energymeter.git' 
+            dest: "{{ host_directory }}/source"
 
-    - name: Initiate empty readings_cache file
-      ansible.builtin.copy:
-        content: ""
-        dest: "{{ host_directory }}/readings_cache.json"
-        mode: '0644'
+      - name: Initiate empty readings_cache file
+        ansible.builtin.copy:
+          content: ""
+          dest: "{{ host_directory }}/readings_cache.json"
+          mode: '0644'
 
-    - name: Configure SELinux
-      ansible.builtin.include_tasks:
-        file: ../_templates/configure_selinux.yml
+      - name: Configure SELinux
+        ansible.builtin.include_tasks:
+          file: ../_templates/configure_selinux.yml
 
-    - name: Build the energy-meters image 
-      community.docker.docker_image:
-        source: build
-        build:
-          path: "{{ host_directory }}/source"
-          rm: true
-        name: energy-meters:latest
+      - name: Build the energy-meters image 
+        community.docker.docker_image:
+          source: build
+          build:
+            path: "{{ host_directory }}/source"
+            rm: true
+          name: energy-meters:latest
 
-    - name: Run the container
-      community.docker.docker_container:
-        name: "{{ container_name }}"
-        detach: true
-        network_mode: bridge
-        image: energy-meters:latest
-        ports:
-          - 5000:5000
-        mounts:
-          - source: "{{ host_directory }}/readings_cache.json"
-            target: /app/afvalwijzer.log
-            type: bind
-            read_only: no 
-          - source: /etc/localtime
-            target: /etc/localtime
-            type: bind
-            read_only: yes
-        volumes:
-          - "{{ host_directory }}/applog:/app/logs:Z"
-        restart_policy: unless-stopped
+      - name: Run the container
+        community.docker.docker_container:
+          name: "{{ container_name }}"
+          detach: true
+          network_mode: bridge
+          image: energy-meters:latest
+          ports:
+            - 5000:5000
+          mounts:
+            - source: "{{ host_directory }}/readings_cache.json"
+              target: /app/afvalwijzer.log
+              type: bind
+              read_only: no 
+            - source: /etc/localtime
+              target: /etc/localtime
+              type: bind
+              read_only: yes
+          volumes:
+            - "{{ host_directory }}/applog:/app/logs:Z"
+          restart_policy: unless-stopped
+      when: inventory_hostname in application_hosts['energy-meters']

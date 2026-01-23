@@ -2,101 +2,103 @@
   become: true 
   gather_facts: False
   vars:
-    host_directory: /opt/docker/influxdb
-    container_name: influxdb
+    application: influxdb
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    container_name: "{{ application }}"
     docker_network: influx-grafana
-    local_backup_folder: "{{ application_data }}/influxdb"
-  vars_files:
-    - ../vault.yml
-    - ../app_versions.yml
+    local_backup_folder: "{{ application_data }}/{{ application }}"
 
   tasks:
-  - name: Create directory
-    file:
-      path: "{{ item }}"
-      state: directory
-      mode: '0755'
-    loop:
-      - "{{ host_directory }}"
-      - "{{ host_directory }}/data"
-      - "{{ host_directory }}/backup"
+    - name: Run only on the on the designated host
+      block:
+      - name: Create directory
+        file:
+          path: "{{ item }}"
+          state: directory
+          mode: '0755'
+        loop:
+          - "{{ host_directory }}"
+          - "{{ host_directory }}/data"
+          - "{{ host_directory }}/backup"
 
-  - name: Copy the influxdb configuration file
-    ansible.builtin.copy:
-      src: "{{ local_backup_folder }}/influxdb.conf"
-      dest: "{{ host_directory }}"  
+      - name: Copy the influxdb configuration file
+        ansible.builtin.copy:
+          src: "{{ local_backup_folder }}/influxdb.conf"
+          dest: "{{ host_directory }}"  
 
-  - name: Add the configuration file to selinux_files_to_label
-    set_fact:
-      selinux_files_to_label:
-      - "{{ host_directory }}/influxdb.conf"
- 
-  - block:
-    # - name: Tar the backup folder on the controller node
-    #   ansible.builtin.command: >
-    #     tar -czvf {{ local_backup_folder }}/backup.tar.gz -C {{ local_backup_folder }} backup
-    #   become: no
-    #   delegate_to: localhost
-    #   vars:
-    - name: Copy the archive to the remote machine
-      ansible.builtin.copy:
-        src: "{{ local_backup_folder }}/backup.tar.gz"
-        dest: "/tmp"
-    - name: Unzip file into the existing folder
-      ansible.builtin.command: >
-        tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/backup
-      become: true
-    when: local_backup_folder is defined and local_backup_folder is not none
+      - name: Add the configuration file to selinux_files_to_label
+        set_fact:
+          selinux_files_to_label:
+          - "{{ host_directory }}/influxdb.conf"
+    
+      - block:
+        # - name: Tar the backup folder on the controller node
+        #   ansible.builtin.command: >
+        #     tar -czvf {{ local_backup_folder }}/backup.tar.gz -C {{ local_backup_folder }} backup
+        #   become: no
+        #   delegate_to: localhost
+        #   vars:
+        - name: Copy the archive to the remote machine
+          ansible.builtin.copy:
+            src: "{{ local_backup_folder }}/backup.tar.gz"
+            dest: "/tmp"
+        - name: Unzip file into the existing folder
+          ansible.builtin.command: >
+            tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/backup
+          become: true
+        when: local_backup_folder is defined and local_backup_folder is not none
 
-  - name: Configure SELinux
-    ansible.builtin.include_tasks:
-      file: ../_templates/configure_selinux.yml
+      - name: Configure SELinux
+        ansible.builtin.include_tasks:
+          file: ../_templates/configure_selinux.yml
 
-  - name: Create the common network to use with grafana container
-    community.docker.docker_network:
-      name: "{{ docker_network }}"
-      driver: bridge
-      state: present
+      - name: Create the common network to use with grafana container
+        community.docker.docker_network:
+          name: "{{ docker_network }}"
+          driver: bridge
+          state: present
 
-  - name: Run the influxdb container
-    community.docker.docker_container:
-      name: "{{ container_name }}"
-      network_mode: "{{ docker_network }}"
-      detach: true
-      image: "{{ app_versions['influx-grafana']['image'] }}"
-      ports:
-        - "8086:8086"  
-      volumes:
-        - "{{ host_directory }}/data:/var/lib/influxdb:Z"
-        - "{{ host_directory }}/influxdb.conf:/etc/influxdb/influxdb.conf:ro"
-      restart_policy: unless-stopped
+      - name: Run the influxdb container
+        community.docker.docker_container:
+          name: "{{ container_name }}"
+          network_mode: "{{ docker_network }}"
+          detach: true
+          image: "{{ app_versions['influx-grafana']['image'] }}"
+          ports:
+            - "8086:8086"  
+          volumes:
+            - "{{ host_directory }}/data:/var/lib/influxdb:Z"
+            - "{{ host_directory }}/influxdb.conf:/etc/influxdb/influxdb.conf:ro"
+          restart_policy: unless-stopped
 
-  - name: Wait for 5 seconds to secure container is running
-    pause:
-      seconds: 5
+      - name: Wait for 5 seconds to secure container is running
+        pause:
+          seconds: 5
 
-  - name: Copy the backup into the container
-    ansible.builtin.command: >
-      docker cp {{ host_directory }}/backup {{ container_name }}:/backup
+      - name: Copy the backup into the container
+        ansible.builtin.command: >
+          docker cp {{ host_directory }}/backup {{ container_name }}:/backup
 
-  - name: Restore the data backup
-    ansible.builtin.command: >
-      docker exec {{ container_name }} influxd restore -portable -db openhab /backup
+      - name: Restore the data backup
+        ansible.builtin.command: >
+          docker exec {{ container_name }} influxd restore -portable -db openhab /backup
 
-  - name: Script the influxdb users creation
-    ansible.builtin.copy:
-      content: |
-          influx -execute "CREATE USER admin WITH PASSWORD '{{ influxdb_admin_password }}' WITH ALL PRIVILEGES"
-          influx -execute "CREATE USER openhab WITH PASSWORD '{{ influxdb_openhab_password }}'" -username admin -password {{ influxdb_admin_password }}
-          influx -execute "GRANT ALL ON openhab TO openhab" -username admin -password {{ influxdb_admin_password }}
+      - name: Script the influxdb users creation
+        ansible.builtin.copy:
+          content: |
+              influx -execute "CREATE USER admin WITH PASSWORD '{{ influxdb_admin_password }}' WITH ALL PRIVILEGES"
+              influx -execute "CREATE USER openhab WITH PASSWORD '{{ influxdb_openhab_password }}'" -username admin -password {{ influxdb_admin_password }}
+              influx -execute "GRANT ALL ON openhab TO openhab" -username admin -password {{ influxdb_admin_password }}
 
-      dest: "{{ host_directory }}/backup/create_users"
-      mode: '0755'
+          dest: "{{ host_directory }}/backup/create_users"
+          mode: '0755'
 
-  - name: Create the users
-    ansible.builtin.shell: #need to use the shell for operations like "<", ">", "|", and "&" to work
-      docker exec -i {{ container_name }} /bin/sh < {{ host_directory }}/backup/create_users
+      - name: Create the users
+        ansible.builtin.shell: #need to use the shell for operations like "<", ">", "|", and "&" to work
+          docker exec -i {{ container_name }} /bin/sh < {{ host_directory }}/backup/create_users
 
-  - name: Remove the backup folder from the container FS 
-    ansible.builtin.command: >
-      docker exec -it {{ container_name }} rm -r /backup
+      - name: Remove the backup folder from the container FS 
+        ansible.builtin.command: >
+          docker exec -it {{ container_name }} rm -r /backup
+          
+      when: inventory_hostname in application_hosts['influxdb']

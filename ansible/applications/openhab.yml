@@ -2,57 +2,58 @@
   become: true 
   gather_facts: False
   vars:
-    host_directory: /opt/docker/openhab
-    container_name: openhab
+    application: openhab
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    container_name: "{{ application }}"
     docker_network: influx-grafana
-    local_backup_folder: "{{ application_data }}/openhab"
-  vars_files:
-    - ../vault.yml
-    - ../app_versions.yml
+    local_backup_folder: "{{ application_data }}/{{ application }}"
 
   tasks:
-  - name: Create directory
-    file:
-      path: "{{ host_directory }}"
-      state: directory
-      mode: '0755'
+    - name: Run only on the on the designated host
+      block:
+      - name: Create directory
+        file:
+          path: "{{ host_directory }}"
+          state: directory
+          mode: '0755'
 
-  - block:
-    - name: Copy the archive to the remote machine
-      ansible.builtin.copy:
-        src: "{{ local_backup_folder }}/backup.tar.gz"
-        dest: "/tmp"
-    - name: Unzip file into the existing folder
-      ansible.builtin.command: >
-        tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}
-      become: true
-    when: local_backup_folder is defined and local_backup_folder is not none
+      - block:
+        - name: Copy the archive to the remote machine
+          ansible.builtin.copy:
+            src: "{{ local_backup_folder }}/backup.tar.gz"
+            dest: "/tmp"
+        - name: Unzip file into the existing folder
+          ansible.builtin.command: >
+            tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}
+          become: true
+        when: local_backup_folder is defined and local_backup_folder is not none
 
-  - name: Run the container
-    community.docker.docker_container:
-      name: "{{ container_name }}"
-      image: "{{app_versions.openhab.image}}"
-      detach: true
-      ports:
-        - 1234:1234
-        - 8101:8101
-        - 8443:8443
-      volumes:
-        - "{{ host_directory }}/addons:/openhab/addons:Z"
-        - "{{ host_directory }}/conf:/openhab/conf:Z"
-        - "{{ host_directory }}/userdata:/openhab/userdata:Z"
-      mounts:
-        - source: /etc/localtime
-          target: /etc/localtime
-          type: bind
-          read_only: yes
-      keep_volumes: yes
-      restart_policy: unless-stopped
-      env:
-        USER_ID: "1001"
-        GROUP_ID: "1001"
-        OPENHAB_HTTP_PORT: "1234"
-        OPENHAB_HTTPS_PORT: "8443"
-        TZ: "Europe/Amsterdam" 
-        CRYPTO_POLICY: "unlimited"
-        EXTRA_JAVA_OPTS: "-Duser.timezone=Europe/Amsterdam"
+      - name: Run the container
+        community.docker.docker_container:
+          name: "{{ container_name }}"
+          image: "{{app_versions.openhab.image}}"
+          detach: true
+          ports:
+            - 1234:1234
+            - 8101:8101
+            - 8443:8443
+          volumes:
+            - "{{ host_directory }}/addons:/openhab/addons:Z"
+            - "{{ host_directory }}/conf:/openhab/conf:Z"
+            - "{{ host_directory }}/userdata:/openhab/userdata:Z"
+          mounts:
+            - source: /etc/localtime
+              target: /etc/localtime
+              type: bind
+              read_only: yes
+          keep_volumes: yes
+          restart_policy: unless-stopped
+          env:
+            USER_ID: "1001"
+            GROUP_ID: "1001"
+            OPENHAB_HTTP_PORT: "1234"
+            OPENHAB_HTTPS_PORT: "8443"
+            TZ: "Europe/Amsterdam" 
+            CRYPTO_POLICY: "unlimited"
+            EXTRA_JAVA_OPTS: "-Duser.timezone=Europe/Amsterdam"
+      when: inventory_hostname in application_hosts['openhab']

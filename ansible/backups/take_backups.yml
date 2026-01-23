@@ -5,13 +5,17 @@
   vars_files:
     - ../vault.yml
     - backup_definitions.yml
+    - ../app_hosts.yml
   tasks:
 
     - name: Delete all existing backups (contents only)
       shell: "rm -rf {{ backups_directory }}/*"
 
     - name: Get current date and time on target host
-      shell: date '+%Y%m%d%H%M%S'
+      shell: |
+        minutes=$(date +%M)
+        rounded_minutes=$(( (minutes / 10) * 10 ))
+        printf "%s%02d\n" $(date +%Y%m%d%H) $rounded_minutes
       register: current_time_result
 
     - name: Set backup timestamp
@@ -29,6 +33,7 @@
       loop: "{{ backup_definitions }}"
       loop_control:
         label: "{{ item.application }}"
+      when: inventory_hostname in application_hosts[item.application]
       vars:
         application_name: "{{ item.application }}"
         container: "{{ item.container }}"
@@ -47,7 +52,7 @@
         dest: "{{ backups_temporary_private_key_file }}"
         mode: '0600'
       become: true
-      become_user: ananchev
+      become_user: "{{ ansible_user }}"
 
     - name: Debug backup variables
       debug:
@@ -61,8 +66,8 @@
     - name: Update ownership in {{ backups_directory }} to avoid denials due to permissions inherited when copying from the containers
       ansible.builtin.file:
         path: "{{ backups_directory }}"
-        owner: ananchev
-        group: ananchev
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
         recurse: yes
 
     - name: Execute raw rsync command
@@ -74,8 +79,27 @@
         {{ backups_directory }} 
         {{ backups_register }}
         {{ backup_user }}@{{ backups_target_host }}:{{ backups_target_location }}
-    #   register: rsync_result
 
+    - name: Debug ZFS backup variables
+      debug:
+        msg:
+          - "Source directory: {{ backups_directory }}"
+          - "ZFS host: {{ zfs_backup_target_host }}"
+          - "ZFS user: {{ zfs_backup_user }}"
+          - "ZFS Destination directory: {{ zfs_backup_target_location }}"
+          - "Private key file: {{ backups_temporary_private_key_file }}"
+
+    - name: Execute raw rsync command to ZFS share with contents only
+      shell: >
+        rsync -avz
+        -c
+        --itemize-changes
+        -e "ssh -i {{ backups_temporary_private_key_file }} -o StrictHostKeyChecking=no"
+        {{ backups_directory }}/{{ backup_timestamp }}/
+        {{ zfs_backup_user }}@{{ zfs_backup_target_host }}:{{ zfs_backup_target_location }}
+      when: zfs_backup_target_host is defined
+
+    #   register: rsync_result
     # - name: Debug rsync result
     #   debug:
     #     var: rsync_result

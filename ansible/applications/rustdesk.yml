@@ -1,0 +1,99 @@
+- hosts: homelab
+  become: true
+  gather_facts: false
+
+  vars:
+    application: rustdesk
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    docker_network: "{{ application }}-net"
+    local_backup_folder: "{{ application_data }}/{{ application }}"
+
+  tasks:
+    - name: Run only on the on the designated host
+      block:
+      - name: Ensure RustDesk data directory exists
+        ansible.builtin.file:
+          path: "{{ host_directory }}"
+          state: directory
+          mode: "0755"
+
+      - name: Copy the archive to the remote machine
+        ansible.builtin.copy:
+          src: "{{ local_backup_folder }}/backup.tar.gz"
+          dest: "/tmp"
+
+      - name: Unzip file into the existing folder
+        ansible.builtin.command: >
+          tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}
+        become: true
+      
+      - name: Бuild custom RustDesk image with busybox
+        block:
+          - name: Ensure build directory exists
+            ansible.builtin.file:
+              path: "/tmp/rustdesk-source"
+              state: directory
+              mode: '0755'
+
+          - name: Create Dockerfile inline
+            ansible.builtin.copy:
+              dest: "/tmp/rustdesk-source/Dockerfile"
+              content: |
+                # Use the 'musl' or 'static' tag to ensure no external dependencies
+                FROM {{ app_versions['busybox']['image'] }}-musl AS bb
+                FROM {{ app_versions['rustdesk']['image'] }}
+
+                # Copy the static binary
+                COPY --from=bb /bin/busybox /bin/busybox
+                
+                # Since the binary is static
+                RUN ["/bin/busybox", "--install", "-s", "/bin"]
+              mode: '0644'
+
+          - name: Build the RustDesk image 
+            community.docker.docker_image:
+              name: "rustdesk-server-busybox"
+              source: build
+              build:
+                path: "/tmp/rustdesk-source"
+                dockerfile: Dockerfile
+                pull: true
+                rm: true
+
+      - name: Create RustDesk docker network
+        community.docker.docker_network:
+          name: "{{ docker_network }}"
+          driver: bridge
+          state: present
+
+      - name: Run RustDesk relay (hbbr)
+        community.docker.docker_container:
+          name: rustdesk-hbbr
+          image: rustdesk-server-busybox
+          command: hbbr
+          restart_policy: unless-stopped
+          volumes:
+            - "{{ host_directory }}:/root"
+          ports:
+            - "21117:21117/tcp"
+          networks:
+            - name: "{{ docker_network }}"
+          state: started
+
+      - name: Run RustDesk rendezvous (hbbs)
+        community.docker.docker_container:
+          name: rustdesk-hbbs
+          image: rustdesk-server-busybox
+          command: hbbs
+          restart_policy: unless-stopped
+          volumes:
+            - "{{ host_directory }}:/root"
+          ports:
+            - "21115:21115/tcp"
+            - "21116:21116/tcp"
+            - "21116:21116/udp"
+          networks:
+            - name: "{{ docker_network }}"
+          state: started
+          
+      when: inventory_hostname in application_hosts['rustdesk']

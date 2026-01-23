@@ -1,5 +1,0 @@
-[homelab]
-unraid ansible_host=192.168.2.2
-
-[unraid]
-unraid

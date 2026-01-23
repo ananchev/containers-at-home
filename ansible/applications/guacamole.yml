@@ -2,138 +2,139 @@
   become: true 
   gather_facts: False
   vars:
-    host_directory: /opt/docker/guacamole
-    container_name: guacamole-postgres
+    application: guacamole
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    container_name: "{{ application }}-postgres"
     docker_network: guacamole-net
-    local_backup_folder: "{{ application_data }}/guacamole"
-  vars_files:
-    - ../vault.yml
-    - ../app_versions.yml
+    local_backup_folder: "{{ application_data }}/{{ application }}"
 
   tasks:
-  - name: Create directory
-    file:
-      path: "{{ item }}"
-      state: directory
-      mode: '0755'
-    loop: 
-      - "{{ host_directory }}"
-      - "{{ host_directory }}/pgdata"
+    - name: Run only on the on the designated host
+      block:
+      - name: Create directory
+        file:
+          path: "{{ item }}"
+          state: directory
+          mode: '0755'
+        loop: 
+          - "{{ host_directory }}"
+          - "{{ host_directory }}/pgdata"
 
-  - name: Copy the db backups to the remote machine
-    ansible.builtin.copy:
-      src: "{{ local_backup_folder }}/{{ item }}"
-      dest: "/tmp"
-    loop:
-      - guacamole_db.sql
-      - postgres_globals.sql
+      - name: Copy the db backups to the remote machine
+        ansible.builtin.copy:
+          src: "{{ local_backup_folder }}/{{ item }}"
+          dest: "/tmp"
+        loop:
+          - guacamole_db.sql
+          - postgres_globals.sql
 
-  - name: Create the docker network for all guacamole containers
-    community.docker.docker_network:
-      name: "{{ docker_network }}"
-      driver: bridge
-      state: present
+      - name: Create the docker network for all guacamole containers
+        community.docker.docker_network:
+          name: "{{ docker_network }}"
+          driver: bridge
+          state: present
 
-  - name: Run the postgres container
-    community.docker.docker_container:
-      name: "{{ container_name }}"
-      hostname: guacamole-postgres
-      image: "{{ app_versions['guacamole-postgres']['image'] }}"
-      network_mode: "{{ docker_network }}"
-      detach: true
-      restart_policy: unless-stopped
-      env: 
-        POSTGRES_PASSWORD: "{{ guacamole_postgres_superuser_pass }}"
-      volumes:
-        - "{{ host_directory }}/pgdata:/var/lib/postgresql/data:Z"
+      - name: Run the postgres container
+        community.docker.docker_container:
+          name: "{{ container_name }}"
+          hostname: guacamole-postgres
+          image: "{{ app_versions['guacamole-postgres']['image'] }}"
+          network_mode: "{{ docker_network }}"
+          detach: true
+          restart_policy: unless-stopped
+          env: 
+            POSTGRES_PASSWORD: "{{ guacamole_postgres_superuser_pass }}"
+          volumes:
+            - "{{ host_directory }}/pgdata:/var/lib/postgresql/data:Z"
 
-  - name: Wait for 5 seconds to secure container is running
-    pause:
-      seconds: 5
+      - name: Wait for 5 seconds to secure container is running
+        pause:
+          seconds: 5
 
-  - name: Copy the backups into the container filesystem
-    ansible.builtin.command: 
-      docker cp /tmp/{{ item }} {{ container_name }}:/tmp
-    loop:
-      - guacamole_db.sql
-      - postgres_globals.sql
+      - name: Copy the backups into the container filesystem
+        ansible.builtin.command: 
+          docker cp /tmp/{{ item }} {{ container_name }}:/tmp
+        loop:
+          - guacamole_db.sql
+          - postgres_globals.sql
 
-  - name: Restore global objects (roles, tablespaces)
-    ansible.builtin.command:
-      docker exec {{ container_name }} psql -U postgres --set ON_ERROR_STOP=off -f /tmp/postgres_globals.sql
+      - name: Restore global objects (roles, tablespaces)
+        ansible.builtin.command:
+          docker exec {{ container_name }} psql -U postgres --set ON_ERROR_STOP=off -f /tmp/postgres_globals.sql
 
-  - name: Create guacamole_db database
-    ansible.builtin.command: docker exec {{ container_name }} createdb -U postgres guacamole_db
-    args:
-      creates: /var/lib/postgresql/data/base # used to check if file (or directory) exists before running the command
+      - name: Create guacamole_db database
+        ansible.builtin.command: docker exec {{ container_name }} createdb -U postgres guacamole_db
+        args:
+          creates: /var/lib/postgresql/data/base # used to check if file (or directory) exists before running the command
 
-  - name: Restore the database
-    ansible.builtin.command: 
-      docker exec {{ container_name }} psql -U postgres -d guacamole_db -f /tmp/guacamole_db.sql
+      - name: Restore the database
+        ansible.builtin.command: 
+          docker exec {{ container_name }} psql -U postgres -d guacamole_db -f /tmp/guacamole_db.sql
 
-  - name: Set related variables (Guacd)
-    set_fact:
-      container_name: guacd
+      - name: Set related variables (Guacd)
+        set_fact:
+          container_name: "{{ application }}-guacd"
 
-  - name: Clone the repository
-    git:
-        repo: 'https://github.com/apache/guacamole-server.git' 
-        dest: "{{ host_directory }}/{{ container_name }}-source"
+      - name: Clone the repository
+        git:
+            repo: 'https://github.com/apache/guacamole-server.git' 
+            dest: "{{ host_directory }}/{{ container_name }}-source"
 
-  - name: Build the guacd image 
-    community.docker.docker_image:
-      source: build
-      build:
-        path: "{{ host_directory }}/{{ container_name }}-source"
-        dockerfile: Dockerfile
-        rm: true
-      name: guacamole-server
+      - name: Build the guacd image 
+        community.docker.docker_image:
+          source: build
+          build:
+            path: "{{ host_directory }}/{{ container_name }}-source"
+            dockerfile: Dockerfile
+            rm: true
+          name: guacamole-server
 
-  - name: Run the guacd container
-    community.docker.docker_container:
-      name: "{{ container_name }}"
-      hostname: guacamole-guacd
-      image: guacamole-server
-      network_mode: "{{ docker_network }}"
-      detach: true
-      restart_policy: unless-stopped
+      - name: Run the guacd container
+        community.docker.docker_container:
+          name: "{{ container_name }}"
+          hostname: guacamole-guacd
+          image: guacamole-server
+          network_mode: "{{ docker_network }}"
+          detach: true
+          restart_policy: unless-stopped
 
-  - name: Set related variables (Guacamole)
-    set_fact:
-      container_name: guacamole
+      - name: Set related variables (Guacamole)
+        set_fact:
+          container_name: "{{ application }}"
 
-  - name: Clone the repository
-    git:
-        repo: 'https://github.com/apache/guacamole-client.git' 
-        dest: "{{ host_directory }}/{{ container_name }}-source"
+      - name: Clone the repository
+        git:
+            repo: 'https://github.com/apache/guacamole-client.git' 
+            dest: "{{ host_directory }}/{{ container_name }}-source"
 
-  - name: Build the guacamole image 
-    community.docker.docker_image:
-      source: build
-      build:
-        path: "{{ host_directory }}/{{ container_name }}-source"
-        dockerfile: Dockerfile
-        rm: true
-      name: guacamole-client
+      - name: Build the guacamole image 
+        community.docker.docker_image:
+          source: build
+          build:
+            path: "{{ host_directory }}/{{ container_name }}-source"
+            dockerfile: Dockerfile
+            rm: true
+          name: guacamole-client
 
-  - name: Run the guacamole container
-    community.docker.docker_container:
-      name: "{{ container_name }}"
-      hostname: guacamole
-      image: guacamole-client
-      network_mode: "{{ docker_network }}"
-      detach: true
-      restart_policy: unless-stopped      
-      env:
-        GUACD_HOSTNAME: guacamole-guacd
-        GUACD_PORT: "4822"
-        POSTGRESQL_HOSTNAME: guacamole-postgres
-        POSTGRESQL_DATABASE: guacamole_db
-        POSTGRESQL_USERNAME: guacamole_user
-        POSTGRESQL_PASSWORD: "{{ guacamole_postgres_guacamole_user_pass }}"
-      ports:
-        - 8188:8080
+      - name: Run the guacamole container
+        community.docker.docker_container:
+          name: "{{ container_name }}"
+          hostname: "{{ application }}"
+          image: guacamole-client
+          network_mode: "{{ docker_network }}"
+          detach: true
+          restart_policy: unless-stopped      
+          env:
+            GUACD_HOSTNAME: "{{ application }}-guacd"
+            GUACD_PORT: "4822"
+            POSTGRESQL_HOSTNAME: "{{ application }}-postgres"
+            POSTGRESQL_DATABASE: guacamole_db
+            POSTGRESQL_USERNAME: guacamole_user
+            POSTGRESQL_PASSWORD: "{{ guacamole_postgres_guacamole_user_pass }}"
+          ports:
+            - 8188:8080
 
-  - name: Cleanup any unused images
-    ansible.builtin.command: 
-      docker image prune -af
+      - name: Cleanup any unused images
+        ansible.builtin.command: 
+          docker image prune -af
+      when: inventory_hostname in application_hosts['guacamole']

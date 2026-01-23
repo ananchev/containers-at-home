@@ -2,43 +2,44 @@
   become: true 
   gather_facts: False
   vars:
-    host_directory: /opt/docker/nginx-proxy-manager
-    container_name: nginx-proxy-manager
-    local_backup_folder: "{{ application_data }}/nginx-proxy-manager"
-  vars_files:
-    - ../vault.yml
-    - ../app_versions.yml
-
+    application: nginx-proxy-manager
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    container_name: "{{ application }}"
+    local_backup_folder: "{{ application_data }}/{{ application }}"
+  
   tasks:
-  - name: Create directory
-    file:
-      path: "{{ item }}"
-      state: directory
-      mode: '0755'
-    loop:
-      - "{{ host_directory }}"
+    - name: Run only on the on the designated host
+      block:
+      - name: Create directory
+        file:
+          path: "{{ item }}"
+          state: directory
+          mode: '0755'
+        loop:
+          - "{{ host_directory }}"
 
-  - block:
-    - name: Copy the archive to the remote machine
-      ansible.builtin.copy:
-        src: "{{ local_backup_folder }}/backup.tar.gz"
-        dest: "/tmp"
-    - name: Unzip file into the existing folder
-      ansible.builtin.command: >
-        tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}
-      become: true
-    when: local_backup_folder is defined and local_backup_folder is not none
+      - block:
+        - name: Copy the archive to the remote machine
+          ansible.builtin.copy:
+            src: "{{ local_backup_folder }}/backup.tar.gz"
+            dest: "/tmp"
+        - name: Unzip file into the existing folder
+          ansible.builtin.command: >
+            tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}
+          become: true
+        when: local_backup_folder is defined and local_backup_folder is not none
 
-  - name: Run the nginx-proxy-manager container
-    community.docker.docker_container:
-      name: "{{ container_name }}"
-      detach: true
-      image: "{{ app_versions['nginx-proxy-manager']['image'] }}"
-      ports:
-        - "80:80"  # Public HTTP Port
-        - "443:443" # Public HTTPS Port
-        - "81:81" # Admin Web Port
-      volumes:
-        - "{{ host_directory }}/data:/data:Z"
-        - "{{ host_directory }}/letsencrypt:/etc/letsencrypt:Z"
-      restart_policy: unless-stopped
+      - name: Run the nginx-proxy-manager container
+        community.docker.docker_container:
+          name: "{{ container_name }}"
+          detach: true
+          image: "{{ app_versions['nginx-proxy-manager']['image'] }}"
+          ports:
+            - "80:80"  # Public HTTP Port
+            - "443:443" # Public HTTPS Port
+            - "81:81" # Admin Web Port
+          volumes:
+            - "{{ host_directory }}/data:/data:Z"
+            - "{{ host_directory }}/letsencrypt:/etc/letsencrypt:Z"
+          restart_policy: unless-stopped
+      when: inventory_hostname in application_hosts['nginx-proxy-manager']

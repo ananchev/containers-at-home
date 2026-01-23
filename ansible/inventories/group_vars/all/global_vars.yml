@@ -1,8 +1,10 @@
-ansible_user: ananchev
+# Global variables for all hosts
 ansible_become: true
 backups_directory: /tmp/backup/
 backups_register: /opt/docker/backups_register
 backups_temporary_private_key_file: "/tmp/backups_private_key.pem"
 backups_target_host: 192.168.2.3
 backups_target_location: /Volumes/wd/containers-backup/
+zfs_backup_target_host: 192.168.2.2
+zfs_backup_target_location: /mnt/zfspool/zfs-backup/
 application_data: /Users/ananchev/Development/containers-at-home/application_data

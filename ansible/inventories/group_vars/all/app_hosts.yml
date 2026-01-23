@@ -1,0 +1,19 @@
+application_hosts:
+  afvalwijzer: fed
+  authelia: fed
+  containers-backup-node:
+    - fed
+    - unas 
+  energy-meters: fed
+  grafana: fed
+  guacamole: fed
+  homeconnect-proxy: fed
+  inadyn: fed
+  influxdb: fed
+  memos: fed
+  mosquitto: fed
+  nginx-proxy-manager: fed
+  openhab: fed
+  passbolt: fed
+  zigbee2mqtt: fed
+  rustdesk: unas

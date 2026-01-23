@@ -2,57 +2,85 @@
   become: true 
   gather_facts: False
   vars:
-    host_directory: /opt/docker/containers-backup-node
-    container_name: containers-backup-node
-  vars_files:
-    - ../vault.yml
+    application: containers-backup-node
+    # Construct the path dynamically using the host-specific variable
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    container_name: "{{ application }}"
+
   tasks:
-    - name: Create build directory
-      file:
-        path: "{{ host_directory }}"
-        state: directory
-        mode: '0755'
-    
-    - name: Clone the repository
-      git:
-          repo: 'https://github.com/ananchev/containers-at-home.git' 
-          dest: "{{ host_directory }}"
+    - name: Run only on the on the designated host
+      block:
+      
+      - name: Create build directory
+        file:
+          path: "{{ host_directory }}"
+          state: directory
+          mode: '0755'
 
-    - name: Build the image
-      community.docker.docker_image_build:
-        name: backup-node
-        path: "{{ host_directory }}"
-        dockerfile: ansible/backups/Dockerfile
+      - name: Generate the backup run script in a temporary location on the host
+        template:
+          src: ../_templates/run-backup-playbook.sh.j2
+          dest: "/tmp/run-backup-playbook.sh"
+          mode: '0755'
+        vars:
+          inventory_name: "{{ inventory_hostname }}"
+      
+      - name: Clone the repository
+        git:
+            repo: 'https://github.com/ananchev/containers-at-home.git' 
+            dest: "{{ host_directory }}"
 
-    - name: Run the container
-      community.docker.docker_container:
-        name: "{{ container_name }}"
-        detach: true
-        image: backup-node
-        env:
-          ANSIBLE_HOST_KEY_CHECKING: "False"
-        mounts:
-          - source: /etc/localtime
-            target: /etc/localtime
-            type: bind
-            read_only: yes
-        restart_policy: unless-stopped
+      - name: Build the image
+        community.docker.docker_image_build:
+          name: backup-node
+          path: "{{ host_directory }}"
+          dockerfile: ansible/backups/Dockerfile
 
-    - name: Wait for 5 seconds to secure container is running
-      pause:
-        seconds: 5
+      - name: Run the container
+        community.docker.docker_container:
+          name: "{{ container_name }}"
+          detach: true
+          image: backup-node
+          env:
+            ANSIBLE_HOST_KEY_CHECKING: "False"
+          mounts:
+            - source: /etc/localtime
+              target: /etc/localtime
+              type: bind
+              read_only: yes
+          restart_policy: unless-stopped
 
-    - name: Create the host key used for ansible within the container to initiate connections
-      ansible.builtin.command:
-        docker exec -i {{ container_name }} /bin/sh -c 'echo "{{ coreos_ssh_private_key }}" > /ansible/container_host_ssh.key'
+      - name: Wait for 5 seconds to secure container is running
+        pause:
+          seconds: 5
+      
+      - name: Copy the generated run-backup-playbook script into the container
+        ansible.builtin.command:
+          cmd: "docker cp /tmp/run-backup-playbook.sh {{ container_name }}:/ansible/backups/run-backup-playbook.sh"
 
-    - name: Change the key file permissions
-      ansible.builtin.command:
-        docker exec -i {{ container_name }} /bin/sh -c 'chmod 600 /ansible/container_host_ssh.key'
+      - name: Ensure the script inside the container is executable
+        community.docker.docker_container_exec:
+          container: "{{ container_name }}"
+          command: "chmod +x /ansible/backups/run-backup-playbook.sh"
 
-    - name: Create vault password file within the container
-      ansible.builtin.command:
-        docker exec -i {{ container_name }} /bin/sh -c 'echo "{{ ansible_vault_pass }}" > /ansible/vault.pass'
+      - name: Clean up the temporary script from the host
+        ansible.builtin.file:
+          path: "/tmp/run-backup-playbook.sh"
+          state: absent
 
-    - name: Clean the build cache and non-tagged images
-      ansible.builtin.command: docker system prune -af
+      - name: Create the host key used for ansible within the container to initiate connections
+        ansible.builtin.command:
+          docker exec -i {{ container_name }} /bin/sh -c 'echo "{{ ssh_private_key }}" > /ansible/container_host_ssh.key'
+
+      - name: Change the key file permissions
+        ansible.builtin.command:
+          docker exec -i {{ container_name }} /bin/sh -c 'chmod 600 /ansible/container_host_ssh.key'
+
+      - name: Create vault password file within the container
+        ansible.builtin.command:
+          docker exec -i {{ container_name }} /bin/sh -c 'echo "{{ ansible_vault_pass }}" > /ansible/vault.pass'
+
+      - name: Clean the build cache and non-tagged images
+        ansible.builtin.command: docker system prune -af
+
+      when: inventory_hostname in application_hosts['containers-backup-node']

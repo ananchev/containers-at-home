@@ -2,106 +2,107 @@
   become: true 
   gather_facts: False
   vars:
-    host_directory: /opt/docker/memos
-    container_name: memos-postgres
-    docker_network: memos-net
-    local_backup_folder: "{{ application_data }}/memos"
-  vars_files:
-    - ../vault.yml
-    - ../app_versions.yml
+    application: memos
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    container_name: "{{ application }}-postgres"
+    docker_network: "{{ application }}-net"
+    local_backup_folder: "{{ application_data }}/{{ application }}"
 
   tasks:
-  - name: Create directory
-    file:
-      path: "{{ item }}"
-      state: directory
-      mode: '0755'
-    loop:
-      - "{{ host_directory }}"
-      - "{{ host_directory }}/data"
-      - "{{ host_directory }}/pgdata"
-  
-  - name: Copy the db backups to the remote machine
-    ansible.builtin.copy:
-      src: "{{ local_backup_folder }}/{{ item }}"
-      dest: "/tmp"
-    loop:
-      - memos.sql
-      - postgres_globals.sql
+    - name: Run only on the on the designated host
+      block:
+      - name: Create directory
+        file:
+          path: "{{ item }}"
+          state: directory
+          mode: '0755'
+        loop:
+          - "{{ host_directory }}"
+          - "{{ host_directory }}/data"
+          - "{{ host_directory }}/pgdata"
+      
+      - name: Copy the db backups to the remote machine
+        ansible.builtin.copy:
+          src: "{{ local_backup_folder }}/{{ item }}"
+          dest: "/tmp"
+        loop:
+          - memos.sql
+          - postgres_globals.sql
 
-  - name: Create the docker network for the memos containers
-    community.docker.docker_network:
-      name: "{{ docker_network }}"
-      driver: bridge
-      state: present
+      - name: Create the docker network for the memos containers
+        community.docker.docker_network:
+          name: "{{ docker_network }}"
+          driver: bridge
+          state: present
 
-  - name: Run the container
-    community.docker.docker_container:
-      name: "{{ container_name }}"
-      hostname: memos-postgres
-      image: "{{ app_versions['memos-postgres']['image'] }}"
-      network_mode: "{{ docker_network }}"
-      detach: true
-      restart_policy: unless-stopped
-      env: 
-        POSTGRES_PASSWORD: "{{ memos_postgres_superuser_pass }}"
-      volumes:
-        - "{{ host_directory }}/pgdata:/var/lib/postgresql/data:Z"
+      - name: Run the container
+        community.docker.docker_container:
+          name: "{{ container_name }}"
+          hostname: memos-postgres
+          image: "{{ app_versions['memos-postgres']['image'] }}"
+          network_mode: "{{ docker_network }}"
+          detach: true
+          restart_policy: unless-stopped
+          env: 
+            POSTGRES_PASSWORD: "{{ memos_postgres_superuser_pass }}"
+          volumes:
+            - "{{ host_directory }}/pgdata:/var/lib/postgresql/data:Z"
 
-  - name: Wait for 5 seconds to secure container is running
-    pause:
-      seconds: 5
+      - name: Wait for 5 seconds to secure container is running
+        pause:
+          seconds: 5
 
-  - name: Copy the database backup into the container filesystem
-    ansible.builtin.command: 
-      docker cp /tmp/{{ item }} {{ container_name }}:/tmp
-    loop:
-      - memos.sql
-      - postgres_globals.sql
+      - name: Copy the database backup into the container filesystem
+        ansible.builtin.command: 
+          docker cp /tmp/{{ item }} {{ container_name }}:/tmp
+        loop:
+          - memos.sql
+          - postgres_globals.sql
 
-  - name: Restore global objects (roles, tablespaces)
-    ansible.builtin.command:
-      docker exec {{ container_name }} psql -U postgres --set ON_ERROR_STOP=off -f /tmp/postgres_globals.sql
+      - name: Restore global objects (roles, tablespaces)
+        ansible.builtin.command:
+          docker exec {{ container_name }} psql -U postgres --set ON_ERROR_STOP=off -f /tmp/postgres_globals.sql
 
-  - name: Create memos database
-    ansible.builtin.command: docker exec {{ container_name }} createdb -U postgres memos
-    args:
-      creates: /var/lib/postgresql/data/base # used to check if file (or directory) exists before running the command
+      - name: Create memos database
+        ansible.builtin.command: docker exec {{ container_name }} createdb -U postgres memos
+        args:
+          creates: /var/lib/postgresql/data/base # used to check if file (or directory) exists before running the command
 
-  - name: Restore the database
-    ansible.builtin.command: 
-      docker exec {{ container_name }} psql -U postgres -d memos -f /tmp/memos.sql
+      - name: Restore the database
+        ansible.builtin.command: 
+          docker exec {{ container_name }} psql -U postgres -d memos -f /tmp/memos.sql
 
-  - name: Set related variables (memos)
-    set_fact:
-      container_name: memos
+      - name: Set related variables (memos)
+        set_fact:
+          container_name: "{{ application }}"
 
-  - name: Copy the file archive backup to the remote machine
-    ansible.builtin.copy:
-      src: "{{ local_backup_folder }}/backup.tar.gz"
-      dest: "/tmp"
+      - name: Copy the file archive backup to the remote machine
+        ansible.builtin.copy:
+          src: "{{ local_backup_folder }}/backup.tar.gz"
+          dest: "/tmp"
 
-  - name: Unzip archive into the memos data folder
-    ansible.builtin.command: >
-      tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/data
-    become: true
-  
-  - name: Run the memos container
-    community.docker.docker_container:
-      name: "{{ container_name }}"
-      detach: true
-      image: "{{ app_versions['memos']['image'] }}"
-      network_mode: "{{ docker_network }}"
-      volumes:
-        - "{{ host_directory }}/data:/var/opt/memos:Z"
-      mounts:
-        - source: /etc/localtime
-          target: /etc/localtime
-          type: bind
-          read_only: yes
-      command: "--driver postgres --dsn 'postgresql://memos:{{ memos_postgres_memos_user_pass }}@memos-postgres:5432/memos?sslmode=disable'"
-      ports:
-      - 5230:5230
-      env:
-        TZ: "Europe/Amsterdam"
-      restart_policy: unless-stopped
+      - name: Unzip archive into the memos data folder
+        ansible.builtin.command: >
+          tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/data
+        become: true
+      
+      - name: Run the memos container
+        community.docker.docker_container:
+          name: "{{ container_name }}"
+          detach: true
+          image: "{{ app_versions['memos']['image'] }}"
+          network_mode: "{{ docker_network }}"
+          volumes:
+            - "{{ host_directory }}/data:/var/opt/memos:Z"
+          mounts:
+            - source: /etc/localtime
+              target: /etc/localtime
+              type: bind
+              read_only: yes
+          command: "--driver postgres --dsn 'postgresql://memos:{{ memos_postgres_memos_user_pass }}@memos-postgres:5432/memos?sslmode=disable'"
+          ports:
+          - 5230:5230
+          env:
+            TZ: "Europe/Amsterdam"
+          restart_policy: unless-stopped
+      when: inventory_hostname in application_hosts['memos']

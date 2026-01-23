@@ -140,3 +140,12 @@ backup_definitions:
         target_filename: postgres_globals.sql
       - source_path: /tmp/memos.sql
         target_filename: memos.sql
+  
+  - application: rustdesk
+    container: rustdesk-hbbr
+    backup_commands:
+      - mkdir -p /tmp
+      - tar -czf /tmp/backup.tar.gz -C /root .
+    copy_actions:
+      - source_path: /tmp/backup.tar.gz
+        target_filename: backup.tar.gz

@@ -2,43 +2,45 @@
   become: true 
   gather_facts: False
   vars:
-    host_directory: /opt/docker/zigbee2mqtt
-    container_name: zigbee2mqtt
-    local_backup_folder: "{{ application_data }}/zigbee2mqtt"
-  vars_files:
-    - ../vault.yml
-    - ../app_versions.yml
-    
+    application: zigbee2mqtt
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    container_name: "{{ application }}"
+    local_backup_folder: "{{ application_data }}/{{ application }}"
+
   tasks:
-  - name: Create directory
-    file:
-      path: "{{ item }}"
-      state: directory
-      mode: '0755'
-    loop:
-      - "{{ host_directory }}"
-      - "{{ host_directory }}/data"
+    - name: Run only on the on the designated host
+      block:
+      - name: Create directory
+        file:
+          path: "{{ item }}"
+          state: directory
+          mode: '0755'
+        loop:
+          - "{{ host_directory }}"
+          - "{{ host_directory }}/data"
 
-  - block:
-    - name: Copy the backup archive to the remote machine
-      ansible.builtin.copy:
-        src: "{{ local_backup_folder }}/backup.tar.gz"
-        dest: "/tmp"
-    - name: Unzip file into the existing folder
-      ansible.builtin.command: >
-        tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/data
-      become: true
-    when: local_backup_folder is defined and local_backup_folder is not none
+      - block:
+        - name: Copy the backup archive to the remote machine
+          ansible.builtin.copy:
+            src: "{{ local_backup_folder }}/backup.tar.gz"
+            dest: "/tmp"
+        - name: Unzip file into the existing folder
+          ansible.builtin.command: >
+            tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/data
+          become: true
+        when: local_backup_folder is defined and local_backup_folder is not none
 
-  - name: Run the container
-    community.docker.docker_container:
-      name: "{{ container_name }}"
-      image: "{{ app_versions.zigbee2mqtt }}"
-      detach: true
-      ports:
-        - 8070:8080
-      volumes:
-        - "{{ host_directory }}/data:/app/data:Z"
-      restart_policy: unless-stopped
-      env:
-        TZ: "Europe/Amsterdam"
+      - name: Run the container
+        community.docker.docker_container:
+          name: "{{ container_name }}"
+          image: "{{ app_versions.zigbee2mqtt }}"
+          detach: true
+          ports:
+            - 8070:8080
+          volumes:
+            - "{{ host_directory }}/data:/app/data:Z"
+          restart_policy: unless-stopped
+          env:
+            TZ: "Europe/Amsterdam"
+            
+      when: inventory_hostname in application_hosts['zigbee2mqtt']

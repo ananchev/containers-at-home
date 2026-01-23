@@ -1,0 +1,6 @@
+#!/bin/sh
+ansible-playbook \
+    -i /ansible/inventories/{{ inventory_name }} \
+    --private-key /ansible/container_host_ssh.key \
+    --vault-password-file /ansible/vault.pass \
+    /ansible/backups/take_backups.yml
