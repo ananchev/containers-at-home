@@ -1,7 +1,7 @@
 application_hosts:
   afvalwijzer: fed
   authelia: fed
-  containers-backup-node:
+  containers-backup:
     - fed
     - unas 
   energy-meters: fed
@@ -17,3 +17,6 @@ application_hosts:
   passbolt: fed
   zigbee2mqtt: fed
   rustdesk: unas
+  backup-manager:
+    - unas
+    - vm

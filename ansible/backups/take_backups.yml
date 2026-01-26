@@ -54,7 +54,9 @@
       become: true
       become_user: "{{ ansible_user }}"
 
-    - name: Debug backup variables
+    # start of remove after zfs backup is stable
+    # --------------------------------
+    - name: Debug backup variables 
       debug:
         msg:
           - "Source directory: {{ backups_directory }}"
@@ -79,6 +81,8 @@
         {{ backups_directory }} 
         {{ backups_register }}
         {{ backup_user }}@{{ backups_target_host }}:{{ backups_target_location }}
+    # --------------------------------
+    # end of remove after zfs backup is stable
 
     - name: Debug ZFS backup variables
       debug:
@@ -91,18 +95,26 @@
 
     - name: Execute raw rsync command to ZFS share with contents only
       shell: >
-        rsync -avz
-        -c
-        --itemize-changes
+        rsync -av -c --itemize-changes
         -e "ssh -i {{ backups_temporary_private_key_file }} -o StrictHostKeyChecking=no"
         {{ backups_directory }}/{{ backup_timestamp }}/
         {{ zfs_backup_user }}@{{ zfs_backup_target_host }}:{{ zfs_backup_target_location }}
       when: zfs_backup_target_host is defined
+      register: rsync_result
 
-    #   register: rsync_result
-    # - name: Debug rsync result
-    #   debug:
-    #     var: rsync_result
+    - name: Mark node backup as successful
+      vars:
+        status_file: "{{ zfs_backup_target_location }}/.status/{{ inventory_hostname }}.ready"
+        remote_command: >
+          ssh -i "{{ backups_temporary_private_key_file }}" 
+          -o StrictHostKeyChecking=no 
+          "{{ zfs_backup_user }}@{{ zfs_backup_target_host }}"
+          "mkdir -p {{ zfs_backup_target_location }}/.status && touch {{ status_file }}"
+      ansible.builtin.shell: "{{ remote_command }}"
+      when: 
+        - rsync_result.rc == 0 
+        - zfs_backup_target_host is defined
+      changed_when: false
 
     - name: Remove temporary private key file from target host
       file:

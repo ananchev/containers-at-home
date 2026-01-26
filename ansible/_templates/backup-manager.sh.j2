@@ -1,0 +1,158 @@
+#!/bin/bash
+set -e # Exit immediately if a command exits with a non-zero status.
+
+# --- CONFIGURATION (from Ansible) ---
+EXPECTED_NODES="{{ all_backup_nodes }}"
+ZFS_BACKUP_PATH="{{ zfs_backup_path }}"
+STATUS_DIR="$ZFS_BACKUP_PATH/.status"
+ZFS_DATASET="{{ zfs_dataset }}"
+UNRAID_ARRAY_PATH="{{ unraid_array_path }}"
+TODAY_TIMESTAMP=$(date +"%Y-%m-%d")
+
+# --- RETENTION (from Ansible) ---
+ZFS_RETENTION_DAYS={{ zfs_retention_days }}
+UNRAID_DAILY_RETENTION={{ unraid_daily_retention }}
+UNRAID_WEEKLY_RETENTION={{ unraid_weekly_retention }}
+UNRAID_MONTHLY_RETENTION={{ unraid_monthly_retention }}
+
+# Set to true via to test logic without deleting
+DRY_RUN={{ dry_run | default(false) | lower }}
+
+# ==============================================================================
+# PRE-RUN CHECKS
+# ==============================================================================
+echo "--- Checking Node Readiness ---"
+mkdir -p "$STATUS_DIR"
+
+MAX_RETRIES=60 # 60 minutes
+RETRY_COUNT=0
+
+while true; do
+    MISSING_NODES=""
+    for NODE in $EXPECTED_NODES; do
+        if [ ! -f "$STATUS_DIR/$NODE.ready" ]; then
+            MISSING_NODES="$MISSING_NODES $NODE"
+        fi
+    done
+
+    if [ -z "$MISSING_NODES" ]; then
+        echo "All nodes reported in. Proceeding..."
+        break
+    fi
+
+    if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+        echo "ERROR: Nodes still missing after 1 hour: $MISSING_NODES. Aborting."
+        exit 1
+    fi
+
+    echo "Waiting for nodes: $MISSING_NODES (Attempt $RETRY_COUNT/$MAX_RETRIES)..."
+    sleep 60
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+done
+
+# ==============================================================================
+# STEP 2: ZFS SNAPSHOT CREATION
+# ==============================================================================
+echo "--- ZFS Snapshot ---"
+SNAPSHOT_NAME="auto-daily-$TODAY_TIMESTAMP"
+if [ "$DRY_RUN" = "true" ]; then
+    echo "[DRY RUN] Would create snapshot: $ZFS_DATASET@$SNAPSHOT_NAME"
+else
+    zfs snapshot "$ZFS_DATASET@$SNAPSHOT_NAME"
+    echo "Successfully created snapshot: $ZFS_DATASET@$SNAPSHOT_NAME"
+fi
+
+# ==============================================================================
+# STEP 3: ARCHIVE TO UNRAID LONG-TERM STORAGE
+# ==============================================================================
+# 1. Define the destination with today's date
+UNRAID_TARGET_DIR="$UNRAID_ARRAY_PATH/$TODAY_TIMESTAMP"
+
+# 2. Define the SOURCE as the ZFS snapshot we just took in Step 2
+# Note: ZFS usually hides the .zfs directory. It is accessible at the root of the mount.
+SNAPSHOT_SRC="$ZFS_BACKUP_PATH/.zfs/snapshot/$SNAPSHOT_NAME"
+
+echo "--- Copying Snapshot to Unraid Archive ---"
+
+if [ "$DRY_RUN" = "true" ]; then
+    echo "[DRY RUN] Would create folder: $UNRAID_TARGET_DIR"
+    echo "[DRY RUN] Would rsync from $SNAPSHOT_SRC/ to $UNRAID_TARGET_DIR/"
+else
+    # Ensure the timestamped folder exists
+    mkdir -p "$UNRAID_TARGET_DIR"
+    
+    # Sync from the "Frozen" snapshot, not the "Live" data
+    # This prevents data corruption if a node syncs during this process
+    rsync -a --info=progress2 --exclude "/.status/" "$ZFS_BACKUP_PATH/.status/" "$SNAPSHOT_SRC/" "$UNRAID_TARGET_DIR/"
+    
+    echo "Snapshot successfully archived to: $UNRAID_TARGET_DIR"
+fi
+
+# ==============================================================================
+# STEP 4: ZFS SNAPSHOT CLEANUP
+# ==============================================================================
+echo "--- ZFS Snapshot Cleanup (Retention: $ZFS_RETENTION_DAYS days) ---"
+# Get the list of all snapshots, oldest first
+OLD_SNAPSHOTS=$(zfs list -H -t snapshot -o name -s creation -d 1 "$ZFS_DATASET" | head -n -${ZFS_RETENTION_DAYS})
+
+if [ -z "$OLD_SNAPSHOTS" ]; then
+    echo "No old snapshots to remove."
+else
+    for snap in $OLD_SNAPSHOTS; do
+        if [ "$DRY_RUN" = "true" ]; then
+            echo "[DRY RUN] Would destroy ZFS snapshot: $snap"
+        else
+            zfs destroy -r "$snap"
+            echo "Destroyed snapshot: $snap"
+        fi
+    done
+fi
+
+# ==============================================================================
+# STEP 5: ADVANCED UNRAID ARRAY CLEANUP (GFS Logic)
+# ==============================================================================
+echo "--- Performing GFS cleanup on Unraid array ---"
+cd "$UNRAID_ARRAY_PATH" || exit
+
+# 1. Mark Weekly Backups (Actual Sundays)
+# Looks at folders older than daily retention to see if they are a Sunday
+find . -mindepth 1 -maxdepth 1 -type d -mtime +${UNRAID_DAILY_RETENTION} | while read -r dir; do
+    DIR_NAME=$(basename "$dir")
+    # %u returns day of week (1..7); 7 is Sunday
+    if WEEKDAY=$(date -d "$DIR_NAME" +%u 2>/dev/null); then
+        if [ "$WEEKDAY" -eq 7 ]; then
+            echo "KEEP (weekly): $DIR_NAME"
+            touch "$dir/.gfs-keep"
+        fi
+    fi
+done
+
+# 2. Mark Monthly Backups (1st of the month)
+find . -mindepth 1 -maxdepth 1 -type d -mtime +${UNRAID_DAILY_RETENTION} -name "*-*-01" | while read -r monthly; do
+    echo "KEEP (monthly): $(basename "$monthly")"
+    touch "$monthly/.gfs-keep"
+done
+
+# 3. Execution of the Purge
+# Delete folders older than daily limit unless they have the .gfs-keep marker
+find . -mindepth 1 -maxdepth 1 -type d -mtime +${UNRAID_DAILY_RETENTION} | while read -r dir; do
+    if [ ! -f "$dir/.gfs-keep" ]; then
+        if [ "$DRY_RUN" = "true" ]; then
+            echo "[DRY RUN] Would DELETE old archive: $dir"
+        else
+            echo "DELETE: $(basename "$dir")"
+            rm -rf "$dir"
+        fi
+    else
+        # Remove marker so it can be re-evaluated next run
+        rm -f "$dir/.gfs-keep"
+        echo "PRESERVED: $dir"
+    fi
+done
+
+# 4. Clear the backup status flags for all nodes for the next run
+# After the Unraid cleanup, "reset" the board for the next day:
+echo "Resetting status flags for tomorrow..."
+rm -f "$STATUS_DIR"/*.ready
+
+echo "Backup process finished successfully."

@@ -2,10 +2,10 @@
   become: true 
   gather_facts: False
   vars:
-    application: containers-backup-node
+    application: containers-backup
     # Construct the path dynamically using the host-specific variable
     host_directory: "{{ docker_data_root }}/{{ application }}"
-    container_name: "{{ application }}"
+    container_name: "{{ application }}-node"
 
   tasks:
     - name: Run only on the on the designated host
@@ -83,4 +83,4 @@
       - name: Clean the build cache and non-tagged images
         ansible.builtin.command: docker system prune -af
 
-      when: inventory_hostname in application_hosts['containers-backup-node']
+      when: inventory_hostname in application_hosts['containers-backup']

@@ -1,0 +1,111 @@
+- hosts: homelab
+  become: true 
+  gather_facts: False
+  vars:
+    application: backup-manager
+    container_name: "{{ application }}-node"
+    dry_run: false
+
+    dockerfile: |
+      FROM alpine:latest
+      # Install dependencies, tzdata for local time, and coreutils for advanced date/touch math
+      RUN apk add --no-cache zfs bash rsync tzdata coreutils
+      
+      # Set Timezone to ensure cron runs at the expected local hour
+      ENV TZ=Europe/Amsterdam
+      RUN cp /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+      
+      # Setup the script
+      COPY backup-manager.sh /usr/local/bin/backup-manager.sh
+      RUN chmod +x /usr/local/bin/backup-manager.sh
+      
+      # Configure Cron to run at 04:00 and pipe output to Docker logs
+      RUN echo "0 4 * * * /usr/local/bin/backup-manager.sh >> /proc/1/fd/1 2>&1" > /etc/crontabs/root
+      
+      # Run cron in the foreground with log level 8
+      ENTRYPOINT ["crond", "-f", "-L", "/dev/stdout"]
+
+    script_vars:
+      zfs_backup_path: /mnt/zfspool/containers-backup
+      zfs_dataset: zfspool/containers-backup
+      unraid_array_path: /mnt/user/backup/containers-backup
+      zfs_retention_days: 14
+      unraid_daily_retention: 14
+      unraid_weekly_retention: 8
+      unraid_monthly_retention: 12
+
+    container_mounts:
+      - { source: /etc/localtime, target: /etc/localtime, type: bind, read_only: yes }
+      - { source: /lib/modules, target: /lib/modules, type: bind, read_only: yes }
+      - { source: /dev/zfs, target: /dev/zfs, type: bind }
+      - { source: "{{ script_vars.unraid_array_path }}", target: "{{ script_vars.unraid_array_path }}", type: bind }
+      - { source: "{{ script_vars.zfs_backup_path }}", target: "{{ script_vars.zfs_backup_path }}", type: bind, propagation: slave }
+
+  tasks:
+    - name: Run only on the designated host
+      block:
+      
+      - name: Stop and remove existing container
+        community.docker.docker_container:
+          name: "{{ container_name }}"
+          state: absent
+
+      - name: Ensure build directory exists
+        ansible.builtin.file:
+          path: "/tmp/backup-manager-build"
+          state: directory
+          mode: '0755'
+
+      - name: Template the backup script into the build directory
+        ansible.builtin.template:
+          src: ../_templates/backup-manager.sh.j2
+          dest: /tmp/backup-manager-build/backup-manager.sh
+          mode: '0755'
+        vars:
+          zfs_backup_path: "{{ script_vars.zfs_backup_path }}"
+          zfs_dataset: "{{ script_vars.zfs_dataset }}"
+          unraid_array_path: "{{ script_vars.unraid_array_path }}"
+          zfs_retention_days: "{{ script_vars.zfs_retention_days }}"
+          unraid_daily_retention: "{{ script_vars.unraid_daily_retention }}"
+          unraid_weekly_retention: "{{ script_vars.unraid_weekly_retention }}"
+          unraid_monthly_retention: "{{ script_vars.unraid_monthly_retention }}"
+          all_backup_nodes: "{{ application_hosts['containers-backup'] | join(' ') }}"
+          dry_run: "{{ dry_run }}"
+      
+      - name: Write the inline Dockerfile to the temp directory
+        ansible.builtin.copy:
+          content: "{{ dockerfile }}"
+          dest: "/tmp/backup-manager-build/Dockerfile"
+
+      - name: Build the image
+        community.docker.docker_image:
+          name: "backup-manager"
+          source: build
+          build:
+            path: "/tmp/backup-manager-build"
+            nocache: true
+          state: present
+          force_source: true
+
+      - name: Run the container
+        community.docker.docker_container:
+          name: "{{ container_name }}"
+          detach: true
+          image: backup-manager
+          privileged: true
+          mounts: "{{ container_mounts }}"
+          restart_policy: unless-stopped
+
+      - name: Copy the backup script into the container
+        ansible.builtin.command:
+          cmd: docker cp /tmp/backup-manager-build/backup-manager.sh {{ container_name }}:/usr/local/bin/backup-manager.sh
+
+      - name: Clean up the temporary directory
+        ansible.builtin.file:
+          path: "/tmp/backup-manager-build"
+          state: absent
+
+      - name: Clean the build cache and non-tagged images
+        ansible.builtin.command: docker system prune -af
+
+      when: inventory_hostname in application_hosts['backup-manager']
