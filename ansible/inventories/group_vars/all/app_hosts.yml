@@ -20,3 +20,5 @@ application_hosts:
   backup-manager:
     - unas
     - vm
+  diun: fed
+  jellyfin: unas

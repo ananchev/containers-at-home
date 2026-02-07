@@ -1,0 +1,59 @@
+- hosts: homelab
+  become: true 
+  gather_facts: False
+  vars:
+    application: jellyfin
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    container_name: "{{ application }}"
+    local_backup_folder: "{{ application_data }}/{{ application }}"
+
+  tasks:
+    - name: Run only on the on the designated host
+      block:
+      - name: Create directory
+        file:
+          path: "{{ host_directory }}"
+          state: directory
+          mode: '0755'
+
+      - name: Copy the backup archive to the remote machine
+        ansible.builtin.copy:
+          src: "{{ local_backup_folder }}/backup.tar.gz"
+          dest: "/tmp"
+      - name: Unzip file into the existing folder
+        ansible.builtin.command: >
+          tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}
+        become: true
+
+      - name: Check for /dev/dri
+        ansible.builtin.stat:
+          path: /dev/dri
+        register: dri
+
+      - set_fact:
+          docker_devices: "{{ ['/dev/dri:/dev/dri'] if dri.stat.exists else [] }}"
+
+      - name: Run the container
+        community.docker.docker_container:
+          name: "{{ container_name }}"
+          image: "{{app_versions.jellyfin.image}}"
+          detach: true
+          ports:
+            - 8096:8096
+            - 7359:7359/udp
+          volumes:
+            - "/mnt/disk1/media/:/media"
+            - "{{ host_directory }}/data:/data"
+            - "{{ host_directory }}/config:/config"
+            - "{{ host_directory }}/cache:/cache"
+          groups:
+            - video # container process should run in the video group to use the GPU for hardware acceleration
+          restart_policy: unless-stopped
+          devices: "{{ docker_devices }}"
+          env:
+            JELLYFIN_DATA_DIR: "/data"
+            JELLYFIN_CONFIG_DIR: "/config"
+            JELLYFIN_CACHE_DIR: "/cache"
+            JELLYFIN_PublishedServerUrl: "{{ ansible_host }}:8096"
+
+      when: inventory_hostname in application_hosts['jellyfin']

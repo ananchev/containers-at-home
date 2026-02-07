@@ -149,3 +149,12 @@ backup_definitions:
     copy_actions:
       - source_path: /tmp/backup.tar.gz
         target_filename: backup.tar.gz
+
+  - application: jellyfin
+    container: jellyfin
+    backup_commands:
+      - mkdir -p /tmp
+      - tar --exclude='/config/log' -czvf /tmp/backup.tar.gz /config /data
+    copy_actions:
+      - source_path: /tmp/backup.tar.gz
+        target_filename: backup.tar.gz
