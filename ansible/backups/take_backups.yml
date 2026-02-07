@@ -54,36 +54,6 @@
       become: true
       become_user: "{{ ansible_user }}"
 
-    # start of remove after zfs backup is stable
-    # --------------------------------
-    - name: Debug backup variables 
-      debug:
-        msg:
-          - "Source directory: {{ backups_directory }}"
-          - "Destination directory: {{ backups_target_location }}"
-          - "Private key file: {{ backups_temporary_private_key_file }}"
-          - "Backup user: {{ backup_user }}"
-          - "Backup host: {{ backups_target_host }}"
-
-    - name: Update ownership in {{ backups_directory }} to avoid denials due to permissions inherited when copying from the containers
-      ansible.builtin.file:
-        path: "{{ backups_directory }}"
-        owner: "{{ ansible_user }}"
-        group: "{{ ansible_user }}"
-        recurse: yes
-
-    - name: Execute raw rsync command
-      shell: >
-        rsync -avz  
-        -c 
-        --itemize-changes 
-        -e "ssh -i {{ backups_temporary_private_key_file }} -o StrictHostKeyChecking=no"
-        {{ backups_directory }} 
-        {{ backups_register }}
-        {{ backup_user }}@{{ backups_target_host }}:{{ backups_target_location }}
-    # --------------------------------
-    # end of remove after zfs backup is stable
-
     - name: Debug ZFS backup variables
       debug:
         msg:
