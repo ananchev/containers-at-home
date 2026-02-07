@@ -33,7 +33,7 @@
       - name: Run the container
         community.docker.docker_container:
           name: "{{ container_name }}"
-          image: "{{ app_versions.zigbee2mqtt }}"
+          image: "{{ app_versions.zigbee2mqtt.image }}"
           detach: true
           ports:
             - 8070:8080
