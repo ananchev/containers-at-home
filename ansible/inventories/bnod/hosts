@@ -1,0 +1,5 @@
+[homelab]
+bnod ansible_host=192.168.111.111
+
+[debian]
+bnod

@@ -30,7 +30,7 @@
               dest: "/tmp"
           - name: Unzip backup archive into the existing folder
             ansible.builtin.command: >
-              tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}
+              tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/borg_data
             become: true
           when: backup_archive is exists
 

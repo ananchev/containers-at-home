@@ -164,8 +164,8 @@ backup_definitions:
     backup_commands:
       - >
         tar -czf /tmp/backup.tar.gz
-            -C /home/apps/borg-ui/borg_data borg.db
-            -C /home/apps/borg-ui/borg_data borg_keys
+            -C /data borg.db
+            -C /data borg_keys
     copy_actions:
       - source_path: /tmp/backup.tar.gz
         target_filename: backup.tar.gz
@@ -173,11 +173,13 @@ backup_definitions:
   - application: caddy
     container: caddy
     backup_commands:
-      - >
-        tar -czf /tmp/backup.tar.gz
-            -C /home/apps/caddy sites
-            -C /home/apps/caddy certs
-            -C /home/apps/caddy data
+      - mkdir -p /tmp/caddy-backup
+      - cp -r /etc/caddy/sites /tmp/caddy-backup/
+      - cp -r /certs /tmp/caddy-backup/
+      - cp -r /data /tmp/caddy-backup/
+      - cp -r /config /tmp/caddy-backup/
+      - tar -czf /tmp/backup.tar.gz -C /tmp/caddy-backup .
+      - rm -rf /tmp/caddy-backup
     copy_actions:
       - source_path: /tmp/backup.tar.gz
         target_filename: backup.tar.gz
