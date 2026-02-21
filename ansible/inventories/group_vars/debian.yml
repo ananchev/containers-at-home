@@ -1,0 +1,6 @@
+# Group variables for the 'coreos' Ansible inventory group.
+# These settings apply to all hosts in the 'coreos' group.
+# For host-specific values, use 'coreos/host_vars/coreos.yml'.
+# Define here variables that should be shared across all coreos hosts.
+
+ansible_python_interpreter: /usr/bin/python3

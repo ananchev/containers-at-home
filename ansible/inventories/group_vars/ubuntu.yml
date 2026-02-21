@@ -1,0 +1,7 @@
+# Group variables for the 'unraid' Ansible inventory group.
+# These settings apply to all hosts in the 'unraid' group.
+# For host-specific values, use 'unraid/host_vars/unraid.yml'.
+# Define here variables that should be shared across all unraid hosts.
+
+ansible_python_interpreter: /usr/bin/python3
+docker_data_root: /opt/docker

@@ -1,0 +1,5 @@
+# Host-specific vars for bnod
+
+ansible_user: ananchev
+ssh_private_key: "{{ bnod_ssh_private_key }}"
+docker_data_root: /home/apps
