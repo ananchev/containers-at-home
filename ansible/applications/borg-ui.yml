@@ -1,0 +1,107 @@
+- hosts: homelab
+  become: true 
+  gather_facts: False
+  vars:
+    application: borg-ui
+    container_name: "{{ application }}"
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    local_backup_folder: "{{ application_data }}/{{ application }}"
+    backup_archive: "{{ local_backup_folder }}/backup.tar.gz"
+    docker_network: reverse-proxy-network
+    internal_network: "{{ application }}-internal"
+
+  tasks:
+    - name: Run only on the on the designated host
+      block:  
+        - name: Create host directory structure
+          file:
+            path: "{{ item }}"
+            state: directory
+            mode: '0755'
+          loop:
+            - "{{ host_directory }}"
+            - "{{ host_directory }}/borg_data"
+            - "{{ host_directory }}/borg_cache"
+
+        - block:
+          - name: Copy the backup archive to the remote machine
+            ansible.builtin.copy:
+              src: "{{ local_backup_folder }}/backup.tar.gz"
+              dest: "/tmp"
+          - name: Unzip backup archive into the existing folder
+            ansible.builtin.command: >
+              tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}
+            become: true
+          when: backup_archive is exists
+
+        - name: Create the reverse-proxy-network if it does not exist
+          community.docker.docker_network:
+            name: "{{ docker_network }}"
+            driver: bridge
+            state: present
+
+        - name: Create the internal network for borg-ui and redis
+          community.docker.docker_network:
+            name: "{{ internal_network }}"
+            driver: bridge
+            state: present
+
+        - name: Seed borg-ui Caddy site config if not present
+          ansible.builtin.copy:
+            dest: "{{ docker_data_root }}/caddy/sites/borg-ui.caddy"
+            mode: '0644'
+            force: false
+            content: |
+              borg.tonio.cc {
+                  reverse_proxy borg-web-ui:8081 {
+                    header_up Cf-Access-Authenticated-User-Email {
+                      http.request.header.Cf-Access-Authenticated-User-Email
+                      }
+                  }
+              }
+
+        - name: Run the Redis container
+          community.docker.docker_container:
+            name: "{{ application }}-redis"
+            image: "{{app_versions[application + '-redis'].image}}"
+            detach: true
+            restart_policy: unless-stopped
+            networks:
+              - name: "{{ internal_network }}"
+
+        - name: Run the container
+          community.docker.docker_container:
+            name: "{{ container_name }}"
+            image: "{{app_versions[application].image}}"
+            detach: true
+            volumes:
+              - "{{ host_directory }}/borg_data:/data"
+              - "{{ host_directory }}/borg_cache:/home/borg/.cache/borg"
+              - /backups-pool:/repo:rw
+            networks:
+              - name: "{{ docker_network }}"
+              - name: "{{ internal_network }}"
+            mounts:
+              - source: /etc/localtime
+                target: /etc/localtime
+                type: bind
+                read_only: yes
+            restart_policy: unless-stopped
+            env:
+              DISABLE_AUTHENTICATION: "true"
+              PROXY_AUTH_HEADER: "Cf-Access-Authenticated-User-Email"
+              PUID: "1000"
+              PGID: "1000"
+              TZ: "Europe/Sofia"
+              REDIS_HOST: "{{ application }}-redis"
+              REDIS_PORT: "6379"
+        - name: Promote Cloudflare Access user to admin
+          community.docker.docker_container_exec:
+            container: "{{ container_name }}"
+            command: >
+              python3 -c
+              "import sqlite3; conn = sqlite3.connect('/data/borg.db'); conn.execute(\"UPDATE users SET is_admin = 1 WHERE username = '{{ borg_ui_admin_email }}'\"); conn.commit(); conn.close()"
+          register: sqlite_result
+          failed_when: sqlite_result.rc != 0
+
+      when: inventory_hostname in application_hosts['borg-ui']

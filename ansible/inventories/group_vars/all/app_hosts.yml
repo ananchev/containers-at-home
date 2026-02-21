@@ -3,7 +3,8 @@ application_hosts:
   authelia: fed
   containers-backup:
     - fed
-    - unas 
+    - unas
+    - bnod
   energy-meters: fed
   grafana: fed
   guacamole: fed
@@ -22,3 +23,5 @@ application_hosts:
     - vm
   diun: fed
   jellyfin: unas
+  borg-ui: bnod
+  caddy: bnod

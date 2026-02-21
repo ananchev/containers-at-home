@@ -1,0 +1,75 @@
+- hosts: homelab
+  become: true
+  gather_facts: False
+  vars:
+    application: caddy
+    container_name: "{{ application }}"
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    local_backup_folder: "{{ application_data }}/{{ application }}"
+    backup_archive: "{{ local_backup_folder }}/backup.tar.gz"
+    docker_network: reverse-proxy-network
+
+  tasks:
+    - name: Run only on the designated host
+      block:
+        - name: Create host directory structure
+          file:
+            path: "{{ item }}"
+            state: directory
+            mode: '0755'
+          loop:
+            - "{{ host_directory }}"
+            - "{{ host_directory }}/config"
+            - "{{ host_directory }}/data"
+            - "{{ host_directory }}/certs"
+            - "{{ host_directory }}/sites"
+
+        - block:
+            - name: Copy the backup archive to the remote machine
+              ansible.builtin.copy:
+                src: "{{ local_backup_folder }}/backup.tar.gz"
+                dest: "/tmp"
+
+            - name: Unzip backup archive into the existing folder
+              ansible.builtin.command: >
+                tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}
+              become: true
+          when: backup_archive is exists
+
+        - name: Create the reverse-proxy-network if it does not exist
+          community.docker.docker_network:
+            name: "{{ docker_network }}"
+            driver: bridge
+            state: present
+
+        - name: Write a Caddyfile to ensure the container starts with a valid configuration
+          ansible.builtin.copy:
+            dest: "{{ host_directory }}/Caddyfile"
+            mode: '0644'
+            content: |
+              import /etc/caddy/sites/*.caddy
+
+        - name: Run the Caddy container
+          community.docker.docker_container:
+            name: "{{ container_name }}"
+            image: "{{ app_versions[application].image }}"
+            detach: true
+            volumes:
+              - "{{ host_directory }}/Caddyfile:/etc/caddy/Caddyfile:ro"
+              - "{{ host_directory }}/sites:/etc/caddy/sites:ro"
+              - "{{ host_directory }}/certs:/certs:ro"
+              - "{{ host_directory }}/data:/data"
+              - "{{ host_directory }}/config:/config"
+            mounts:
+              - source: /etc/localtime
+                target: /etc/localtime
+                type: bind
+                read_only: yes
+            ports:
+              - "80:80"
+              - "443:443"
+            restart_policy: unless-stopped
+            networks:
+              - name: "{{ docker_network }}"
+
+      when: inventory_hostname in application_hosts['caddy']
