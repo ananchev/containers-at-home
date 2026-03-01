@@ -107,7 +107,9 @@ backup_definitions:
       - mariadb-dump -u {{ passbolt_mysql_user }} -p{{ passbolt_mysql_pass }} {{ passbolt_mysql_db }} --result-file=/tmp/db_backup.sql
     copy_actions:
       - source_path: /tmp/db_backup.sql
-        target_filename: /db_backup.sql
+        target_filename: db_backup.sql
+      - source_path: /etc/mysql/conf.d/99-replication.cnf
+        target_filename: 99-replication.cnf
 
   - application: passbolt
     container: passbolt

@@ -1,0 +1,329 @@
+- hosts: homelab
+  become: true
+  gather_facts: false
+  vars:
+    application: passbolt-recovery
+    passbolt_backup_source_dir: "{{ application_data }}/passbolt"
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    recovery_dr_env_file: "{{ host_directory }}/dr-secrets.env"
+    docker_network: "{{ application }}-net"
+    mariadb_replication_server_id: 2 # Must be unique across Alpha and Beta MariaDB instances
+    mariadb_replication_read_only: true # Keep standby DB read-only during normal operation; disable during failover
+    passbolt_main_host_ip: 192.168.2.8 # main passbolt host IP as accessible from the recovery host — used as MASTER_HOST for MariaDB replication
+
+  tasks:
+    - name: Run only on designated recovery host(s)
+      block:
+        - name: Fail if db backup is missing on control machine
+          ansible.builtin.assert:
+            that:
+              - lookup('ansible.builtin.file', passbolt_backup_source_dir ~ '/db_backup.sql', errors='ignore') != ''
+            fail_msg: >-
+              Missing backup file on control machine: {{ passbolt_backup_source_dir }}/db_backup.sql
+          run_once: true
+
+        - name: Create recovery directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            mode: "0755"
+          loop:
+            - "{{ host_directory }}"
+            - "{{ host_directory }}/backup"
+            - "{{ host_directory }}/mysql-data"
+            - "{{ host_directory }}/mysql-conf"
+            - "{{ host_directory }}/gpg"
+            - "{{ host_directory }}/jwt"
+            - "{{ host_directory }}/cert"
+
+        - name: Render MariaDB replication config to recovery host
+          ansible.builtin.template:
+            src: ../_templates/mariadb-replication.cnf.j2
+            dest: "{{ host_directory }}/mysql-conf/99-replication.cnf"
+            mode: "0644"
+
+        - name: Create DR credentials environment file on recovery host
+          ansible.builtin.copy:
+            content: |
+              export PASSBOLT_MYSQL_ROOT_PASSWORD={{ passbolt_mysql_root_password | to_json }}
+              export CLOUDFLARE_TOKEN_USERNAME={{ inadyn_cloudflare_token_username | to_json }}
+              export CLOUDFLARE_API_TOKEN={{ inadyn_cloudflare_token_password | to_json }}
+            dest: "{{ recovery_dr_env_file }}"
+            owner: root
+            group: root
+            mode: "0600"
+
+        - name: Create update-dns script for Cloudflare DNS updates for temporary failover to the recovery instance
+          ansible.builtin.copy:
+            content: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              set -a
+              source "{{ recovery_dr_env_file }}"
+              set +a
+
+              AUTH_HEADER="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+              DOMAIN="passbolt.tonio.cc"
+              PUBLIC_IP="$(curl -fsS ifconfig.me)"
+
+              ZONE_ID="$(curl -fsS \
+                  -H "${AUTH_HEADER}" \
+                  "https://api.cloudflare.com/client/v4/zones?name=tonio.cc&status=active" \
+                  | jq -r '.result[0].id')"
+
+              RECORD_ID="$(curl -fsS \
+                  -H "${AUTH_HEADER}" \
+                  "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records?type=A&name=${DOMAIN}" \
+                  | jq -r '.result[0].id')"
+
+              PAYLOAD="$(printf '{"type":"A","name":"%s","content":"%s","ttl":1,"proxied":true}' \
+                  "${DOMAIN}" "${PUBLIC_IP}")"
+
+              curl -fsS -X PUT \
+                  "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records/${RECORD_ID}" \
+                  -H "${AUTH_HEADER}" \
+                  -H "Content-Type: application/json" \
+                  --data "${PAYLOAD}"
+            dest: "{{ host_directory }}/update-dns.sh"
+            owner: root
+            group: root
+            mode: "0700"
+
+        - name: Create set-replication-source script on recovery host
+          ansible.builtin.copy:
+            content: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              if [[ $# -ne 2 ]]; then
+                  echo "Usage: $0 <MASTER_LOG_FILE> <MASTER_LOG_POS>" >&2
+                  echo "where MASTER_LOG_FILE and MASTER_LOG_POS are obtained by running show-master-status.sh on the main host"
+                  exit 1
+              fi
+
+              MASTER_LOG_FILE="$1"
+              MASTER_LOG_POS="$2"
+
+              set -a
+              source "{{ recovery_dr_env_file }}"
+              set +a
+
+              docker exec -i mariadb-passbolt-recovery mariadb -uroot -p"${PASSBOLT_MYSQL_ROOT_PASSWORD}" -e "
+              STOP SLAVE;
+              RESET SLAVE ALL;
+              CHANGE MASTER TO
+                MASTER_HOST='{{ passbolt_main_host_ip }}',
+                MASTER_PORT=3306,
+                MASTER_USER='root',
+                MASTER_PASSWORD='${PASSBOLT_MYSQL_ROOT_PASSWORD}',
+                MASTER_LOG_FILE='${MASTER_LOG_FILE}',
+                MASTER_LOG_POS=${MASTER_LOG_POS},
+                MASTER_SSL=0,
+                MASTER_SSL_VERIFY_SERVER_CERT=0;
+              START SLAVE;
+              SHOW SLAVE STATUS\G
+              "
+            dest: "{{ host_directory }}/set-replication-source.sh"
+            owner: root
+            group: root
+            mode: "0700"
+
+        - name: Create show-slave-status script on recovery host
+          ansible.builtin.copy:
+            content: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              set -a
+              source "{{ recovery_dr_env_file }}"
+              set +a
+
+              docker exec -i mariadb-passbolt-recovery mariadb -uroot -p"${PASSBOLT_MYSQL_ROOT_PASSWORD}" \
+                  -e "SHOW SLAVE STATUS\G"
+
+              echo ""
+              echo "Confirm replication is healthy:"
+              echo "  Slave_IO_Running: Yes"
+              echo "  Slave_SQL_Running: Yes"
+              echo "  Seconds_Behind_Master: 0  (or quickly converging)"
+            dest: "{{ host_directory }}/show-slave-status.sh"
+            owner: root
+            group: root
+            mode: "0700"
+
+        - name: Create the application Docker network if it does not exist
+          community.docker.docker_network:
+            name: "{{ docker_network }}"
+            driver: bridge
+            state: present
+
+        - name: Create the reverse-proxy-network if it does not exist
+          community.docker.docker_network:
+            name: reverse-proxy-network
+            driver: bridge
+            state: present
+
+        - name: Seed passbolt Caddy site config if not present
+          ansible.builtin.copy:
+            dest: "{{ docker_data_root }}/caddy/sites/passbolt.caddy"
+            mode: '0644'
+            force: false
+            content: |
+              passbolt.tonio.cc {
+                  tls /certs/origin.pem /certs/origin.key
+                  reverse_proxy passbolt-recovery:443 {
+                      transport http {
+                          tls_insecure_skip_verify
+                      }
+                  }
+              }
+
+        - name: Copy db seed backup to recovery host (used only on first MariaDB init)
+          ansible.builtin.copy:
+            src: "{{ passbolt_backup_source_dir }}/db_backup.sql"
+            dest: "{{ host_directory }}/backup/db_backup.sql"
+            mode: "0644"
+
+        - name: Copy backup archive to temporary location on recovery host
+          ansible.builtin.copy:
+            src: "{{ passbolt_backup_source_dir }}/backup.tar.gz"
+            dest: "/tmp/backup.tar.gz"
+            mode: "0600"
+
+        - name: Extract backup archive directly into host directory (strip top-level backup/)
+          ansible.builtin.unarchive:
+            src: "/tmp/backup.tar.gz"
+            dest: "{{ host_directory }}"
+            remote_src: true
+            extra_opts:
+              - --strip-components=1
+
+        - name: Remove temporary backup archive from recovery host
+          ansible.builtin.file:
+            path: "/tmp/backup.tar.gz"
+            state: absent
+
+        - name: Validate extracted recovery files
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          loop:
+            - "{{ host_directory }}/cert/certificate.crt"
+            - "{{ host_directory }}/cert/certificate.key"
+            - "{{ host_directory }}/gpg/serverkey.asc"
+            - "{{ host_directory }}/gpg/serverkey_private.asc"
+          register: extracted_files_stat
+
+        - name: Fail if extracted files are missing
+          ansible.builtin.assert:
+            that:
+              - extracted_files_stat.results | map(attribute='stat.exists') | min
+            fail_msg: >-
+              One or more required files are missing after archive extraction in {{ host_directory }}.
+              Expected: cert/certificate.crt, cert/certificate.key, gpg/serverkey.asc, gpg/serverkey_private.asc
+
+        - name: Ensure directory permissions
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: directory
+            owner: "{{ item.owner }}"
+            group: "{{ item.group }}"
+            mode: "{{ item.mode }}"
+          loop:
+            - { path: "{{ host_directory }}/cert", owner: "root", group: "root", mode: "0755" }
+            - { path: "{{ host_directory }}/gpg", owner: "33", group: "33", mode: "0755" }
+            - { path: "{{ host_directory }}/jwt", owner: "33", group: "33", mode: "0755" }
+
+        - name: Set file permissions for cert and gpg assets
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: file
+            owner: "{{ item.owner }}"
+            group: "{{ item.group }}"
+            mode: "{{ item.mode }}"
+          loop:
+            - { path: "{{ host_directory }}/cert/certificate.crt", owner: "root", group: "root", mode: "0644" }
+            - { path: "{{ host_directory }}/cert/certificate.key", owner: "root", group: "root", mode: "0640" }
+            - { path: "{{ host_directory }}/gpg/serverkey.asc", owner: "33", group: "33", mode: "0440" }
+            - { path: "{{ host_directory }}/gpg/serverkey_private.asc", owner: "33", group: "33", mode: "0440" }
+
+        - name: Deploy the maria-db recovery container
+          block:
+            - name: Set a fact with maria-db recovery container name
+              ansible.builtin.set_fact:
+                recovery_mysql_container_name: mariadb-passbolt-recovery
+
+            - name: Run the maria-db recovery container (init SQL is applied only when mysql-data is empty)
+              community.docker.docker_container:
+                name: "{{ recovery_mysql_container_name }}"
+                network_mode: "{{ docker_network }}"
+                image: "{{ app_versions['mariadb-passbolt']['image'] }}"
+                detach: true
+                volumes:
+                  - "{{ host_directory }}/mysql-data:/var/lib/mysql:Z"
+                mounts:
+                  - source: "{{ host_directory }}/backup/db_backup.sql"
+                    target: /docker-entrypoint-initdb.d/passbolt-db.sql
+                    type: bind
+                    read_only: no
+                  - source: "{{ host_directory }}/mysql-conf/99-replication.cnf"
+                    target: /etc/mysql/conf.d/99-replication.cnf
+                    type: bind
+                    read_only: yes
+                restart_policy: unless-stopped
+                env:
+                  MYSQL_ROOT_PASSWORD: "{{ passbolt_mysql_root_password }}"
+                  MYSQL_DATABASE: "{{ passbolt_mysql_db }}"
+                  MYSQL_USER: "{{ passbolt_mysql_user }}"
+                  MYSQL_PASSWORD: "{{ passbolt_mysql_pass }}"
+
+            - name: Get details of the maria-db recovery container
+              community.docker.docker_container_info:
+                name: "{{ recovery_mysql_container_name }}"
+              register: recovery_mysql_container_info
+
+        - name: Deploy the passbolt recovery container (stopped)
+          block:
+            - name: Set a fact with passbolt recovery container name
+              ansible.builtin.set_fact:
+                recovery_passbolt_container_name: passbolt-recovery
+
+            - name: Create the passbolt recovery container in stopped state
+              community.docker.docker_container:
+                name: "{{ recovery_passbolt_container_name }}"
+                networks:
+                  - name: "{{ docker_network }}"
+                  - name: reverse-proxy-network
+                image: "{{ app_versions['passbolt']['image'] }}"
+                detach: true
+                state: stopped
+                ports:
+                  - "8082:80"
+                  - "4433:443"
+                volumes:
+                  - "{{ host_directory }}/jwt:/etc/passbolt/jwt"
+                  - "{{ host_directory }}/gpg:/etc/passbolt/gpg"
+                mounts:
+                  - source: "{{ host_directory }}/cert/certificate.crt"
+                    target: /etc/ssl/certs/certificate.crt
+                    type: bind
+                    read_only: yes
+                  - source: "{{ host_directory }}/cert/certificate.key"
+                    target: /etc/ssl/certs/certificate.key
+                    type: bind
+                    read_only: yes
+                restart_policy: "no"
+                env:
+                  APP_FULL_BASE_URL: "{{ passbolt_app_full_base_url }}"
+                  DATASOURCES_DEFAULT_HOST: "{{ recovery_mysql_container_name }}"
+                  DATASOURCES_DEFAULT_DATABASE: "{{ passbolt_mysql_db }}"
+                  DATASOURCES_DEFAULT_USERNAME: "{{ passbolt_mysql_user }}"
+                  DATASOURCES_DEFAULT_PASSWORD: "{{ passbolt_mysql_pass }}"
+                  PASSBOLT_SSL_FORCE: "true"
+                  PASSBOLT_SECURITY_SMTP_SETTINGS_ENDPOINTS_DISABLED: "false"
+                  PASSBOLT_GPG_SERVER_KEY_FINGERPRINT: "{{ passbolt_gpg_server_key_fingerprint }}"
+                  PASSBOLT_KEY_EMAIL: "{{ passbolt_key_email }}"
+                command: >
+                  /usr/bin/wait-for.sh -t 0 {{ recovery_mysql_container_name }}:3306 -- /docker-entrypoint.sh
+
+      when: inventory_hostname in application_hosts['passbolt-recovery']

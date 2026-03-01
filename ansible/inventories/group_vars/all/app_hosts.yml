@@ -25,3 +25,4 @@ application_hosts:
   jellyfin: unas
   borg-ui: bnod
   caddy: bnod
+  passbolt-recovery: bnod

@@ -6,6 +6,9 @@
     host_directory: "{{ docker_data_root }}/{{ application }}"
     docker_network: "{{ application }}-net"
     local_backup_folder: "{{ application_data }}/{{ application }}"
+    mariadb_replication_server_id: 1 # Must be unique across Alpha and Beta MariaDB instances
+    mariadb_replication_read_only: false # Keep primary DB read-write during normal operation
+    dr_env_file: "{{ host_directory }}/dr-secrets.env"
 
   tasks:
     - name: Run only on the on the designated host
@@ -19,6 +22,7 @@
           - "{{ host_directory }}"
           - "{{ host_directory }}/backup"
           - "{{ host_directory }}/mysql-data"
+          - "{{ host_directory }}/mysql-conf"
           - "{{ host_directory }}/gpg"
           - "{{ host_directory }}/jwt"
 
@@ -27,6 +31,77 @@
           name: "{{ docker_network }}"
           driver: bridge
           state: present
+
+      - name: Create DR credentials environment file on Alpha host
+        ansible.builtin.copy:
+          content: |
+            export PASSBOLT_MYSQL_ROOT_PASSWORD={{ passbolt_mysql_root_password | to_json }}
+            export CLOUDFLARE_TOKEN_USERNAME={{ inadyn_cloudflare_token_username | to_json }}
+            export CLOUDFLARE_API_TOKEN={{ inadyn_cloudflare_token_password | to_json }}
+          dest: "{{ dr_env_file }}"
+          owner: root
+          group: root
+          mode: "0600"
+
+      - name: Create update-dns script for Cloudflare DNS updates after temporary failover to the recovery instance
+        ansible.builtin.copy:
+          content: |
+            #!/usr/bin/env bash
+            set -euo pipefail
+
+            set -a
+            source "{{ dr_env_file }}"
+            set +a
+
+            AUTH_HEADER="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+            DOMAIN="passbolt.tonio.cc"
+            PUBLIC_IP="$(curl -fsS ifconfig.me)"
+
+            ZONE_ID="$(curl -fsS \
+                -H "${AUTH_HEADER}" \
+                "https://api.cloudflare.com/client/v4/zones?name=tonio.cc&status=active" \
+                | jq -r '.result[0].id')"
+
+            RECORD_ID="$(curl -fsS \
+                -H "${AUTH_HEADER}" \
+                "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records?type=A&name=${DOMAIN}" \
+                | jq -r '.result[0].id')"
+
+            PAYLOAD="$(printf '{"type":"A","name":"%s","content":"%s","ttl":1,"proxied":true}' \
+                "${DOMAIN}" "${PUBLIC_IP}")"
+
+            curl -fsS -X PUT \
+                "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records/${RECORD_ID}" \
+                -H "${AUTH_HEADER}" \
+                -H "Content-Type: application/json" \
+                --data "${PAYLOAD}"
+          dest: "{{ host_directory }}/update-dns.sh"
+          owner: root
+          group: root
+          mode: "0700"
+
+      - name: Create show-master-status script on Alpha host
+        ansible.builtin.copy:
+          content: |
+            #!/usr/bin/env bash
+            set -euo pipefail
+
+            set -a
+            source "{{ dr_env_file }}"
+            set +a
+
+            docker exec -i mariadb-passbolt mariadb -uroot -p"${PASSBOLT_MYSQL_ROOT_PASSWORD}" -N \
+                -e "SHOW MASTER STATUS;"
+
+            echo ""
+            echo "expected output is <mysql-bin.000003	19652> but values will differ."
+            echo "take a note of the <mysql-bin.xxxxx> as MASTER_LOG_FILE and yyyyy as MASTER_LOG_POS coordinates"
+            echo "Then on the recovery host run:"
+            echo "  sudo {{ docker_data_root }}/passbolt-recovery/set-replication-source.sh <MASTER_LOG_FILE> <MASTER_LOG_POS>"
+          dest: "{{ host_directory }}/show-master-status.sh"
+          owner: root
+          group: root
+          mode: "0700"
 
       - name: Deploy the maria-db container
         block:
@@ -39,10 +114,17 @@
             src: "{{ local_backup_folder }}/db_backup.sql"
             dest: "{{ host_directory }}/backup"
 
-        - name: Add the database dump to selinux_files_to_label
+        - name: Render MariaDB replication config to remote machine
+          ansible.builtin.template:
+            src: ../_templates/mariadb-replication.cnf.j2
+            dest: "{{ host_directory }}/mysql-conf/99-replication.cnf"
+            mode: '0644'
+
+        - name: Add MariaDB files to selinux_files_to_label
           set_fact:
             selinux_files_to_label:
             - "{{ host_directory }}/backup/db_backup.sql"
+            - "{{ host_directory }}/mysql-conf/99-replication.cnf"
 
         - name: Configure SELinux
           ansible.builtin.include_tasks:
@@ -61,17 +143,62 @@
                 target: /docker-entrypoint-initdb.d/passbolt-db.sql
                 type: bind
                 read_only: no
+              - source: "{{ host_directory }}/mysql-conf/99-replication.cnf"
+                target: /etc/mysql/conf.d/99-replication.cnf
+                type: bind
+                read_only: yes
             restart_policy: unless-stopped
             env:
-              MYSQL_RANDOM_ROOT_PASSWORD: "true"
+              MYSQL_ROOT_PASSWORD: "{{ passbolt_mysql_root_password }}"
               MYSQL_DATABASE: "{{ passbolt_mysql_db }}"
               MYSQL_USER: "{{ passbolt_mysql_user }}"
               MYSQL_PASSWORD: "{{ passbolt_mysql_pass }}"
+            published_ports:
+              - "3306:3306"
 
         - name: Get details of the maria-db container
           community.docker.docker_container_info:
             name: "{{ container_name }}"
           register: mysql_container_info
+
+        - name: Wait for MariaDB to accept connections
+          wait_for:
+            host: "{{ mysql_container_info.container.NetworkSettings.Networks[docker_network].IPAddress }}"
+            port: "3306"
+            state: started
+            delay: 5
+            timeout: 60
+            sleep: 5
+
+        - name: Recovery instance re-setup instructions
+          ansible.builtin.debug:
+            msg:
+              - "Beta rebuild flow after the main instance (Alpha) restore:"
+              - "1) On Alpha's host, get current coordinates:"
+              - "docker exec -i mariadb-passbolt mariadb -uroot -p'{{ passbolt_mysql_root_password }}' -N -e \"SHOW MASTER STATUS;\""
+              - "Record the two values: first is the MASTER_LOG_FILE and the second is the MASTER_LOG_POS."
+              - "2) Hard-reset the recovery (Beta) instance by removing both containers (passbolt-recovery and mariadb-passbolt-recovery) and removing their host folder so Beta starts from a fully clean state."
+              - "3) Re-deploy Beta by running the passbolt-recovery playbook."
+              - "4) Reconfigure replication on Beta (replace placeholders) and run on its host:"
+              - "docker exec -i mariadb-passbolt-recovery mariadb -uroot -p'{{ passbolt_mysql_root_password }}' -e \""
+              - "STOP SLAVE;"
+              - "RESET SLAVE ALL;"
+              - "CHANGE MASTER TO"
+              - "  MASTER_HOST='{{ hostvars[inventory_hostname].ansible_host | default(inventory_hostname) }}',"
+              - "  MASTER_PORT=3306,"
+              - "  MASTER_USER='root',"
+              - "  MASTER_PASSWORD='{{ passbolt_mysql_root_password }}',"
+              - "  MASTER_LOG_FILE='<MASTER_LOG_FILE>',"
+              - "  MASTER_LOG_POS=<MASTER_LOG_POS>,"
+              - "  MASTER_SSL=0,"
+              - "  MASTER_SSL_VERIFY_SERVER_CERT=0;"
+              - "START SLAVE;"
+              - "SHOW SLAVE STATUS\\G"
+              - "\""
+              - "5) Wait 15 seconds for replication to start"
+              - "6) On Beta, run"
+              - "   docker exec -it mariadb-passbolt-recovery mariadb -uroot -p'{{ passbolt_mysql_root_password }}' -e \"SHOW SLAVE STATUS\\G\""
+              - "Confirm: Slave_IO_Running=Yes, Slave_SQL_Running=Yes, Seconds_Behind_Master=0 (or quickly converging)."
 
       - name: Deploy the passbolt container
         block:

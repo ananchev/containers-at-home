@@ -1,0 +1,8 @@
+[mysqld]
+server_id={{ mariadb_replication_server_id }}
+log_bin=mysql-bin
+binlog_format=ROW
+bind-address={{ mariadb_replication_bind_address | default('0.0.0.0') }}
+{% if mariadb_replication_read_only | default(false) %}
+read_only=ON
+{% endif %}
