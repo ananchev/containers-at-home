@@ -11,7 +11,7 @@ application_hosts:
   homeconnect-proxy: fed
   inadyn: fed
   influxdb: fed
-  memos: fed
+  memos: unas
   mosquitto: fed
   nginx-proxy-manager: fed
   openhab: fed

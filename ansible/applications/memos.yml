@@ -4,6 +4,7 @@
   vars:
     application: memos
     host_directory: "{{ docker_data_root }}/{{ application }}"
+    storage_directory: "{{ filestore_root }}/{{ application }}"
     container_name: "{{ application }}-postgres"
     docker_network: "{{ application }}-net"
     local_backup_folder: "{{ application_data }}/{{ application }}"
@@ -18,7 +19,7 @@
           mode: '0755'
         loop:
           - "{{ host_directory }}"
-          - "{{ host_directory }}/data"
+          - "{{ storage_directory }}"
           - "{{ host_directory }}/pgdata"
       
       - name: Copy the db backups to the remote machine
@@ -83,7 +84,7 @@
 
       - name: Unzip archive into the memos data folder
         ansible.builtin.command: >
-          tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/data
+          tar -xzvf /tmp/backup.tar.gz -C {{ storage_directory }}
         become: true
       
       - name: Run the memos container
@@ -93,7 +94,7 @@
           image: "{{ app_versions['memos']['image'] }}"
           network_mode: "{{ docker_network }}"
           volumes:
-            - "{{ host_directory }}/data:/var/opt/memos:Z"
+            - "{{ storage_directory }}:/var/opt/memos"
           mounts:
             - source: /etc/localtime
               target: /etc/localtime

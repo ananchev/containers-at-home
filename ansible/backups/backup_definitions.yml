@@ -105,10 +105,11 @@ backup_definitions:
     container: mariadb-passbolt
     backup_commands:
       - mariadb-dump -u {{ passbolt_mysql_user }} -p{{ passbolt_mysql_pass }} {{ passbolt_mysql_db }} --result-file=/tmp/db_backup.sql
+      - cp /etc/mysql/conf.d/99-replication.cnf /tmp/99-replication.cnf
     copy_actions:
       - source_path: /tmp/db_backup.sql
         target_filename: db_backup.sql
-      - source_path: /etc/mysql/conf.d/99-replication.cnf
+      - source_path: /tmp/99-replication.cnf
         target_filename: 99-replication.cnf
 
   - application: passbolt
@@ -120,14 +121,6 @@ backup_definitions:
       - cp /etc/passbolt/gpg/serverkey.asc /tmp/backup/gpg/
       - cp /etc/passbolt/gpg/serverkey_private.asc /tmp/backup/gpg/
       - tar -czvf /tmp/backup.tar.gz -C /tmp backup
-    copy_actions:
-      - source_path: /tmp/backup.tar.gz
-        target_filename: backup.tar.gz
-
-  - application: memos
-    container: memos
-    backup_commands:
-      - tar -czf /tmp/backup.tar.gz -C /var/opt/memos/ .
     copy_actions:
       - source_path: /tmp/backup.tar.gz
         target_filename: backup.tar.gz
