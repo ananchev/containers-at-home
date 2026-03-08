@@ -33,6 +33,7 @@
         loop: "{{ app_versions | dict2items }}"
         loop_control:
           loop_var: i
+        when: i.value.diun_watch | default(true)
 
       - name: Delete existing watchlist.yml
         ansible.builtin.file:

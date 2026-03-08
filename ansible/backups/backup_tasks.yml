@@ -23,6 +23,15 @@
   loop_control:
     loop_var: copy_action
 
+- name: Run host commands for {{ application_name }}
+  ansible.builtin.shell: "{{ host_cmd }}"
+  args:
+    executable: /bin/bash
+  loop: "{{ host_commands }}"
+  loop_control:
+    loop_var: host_cmd
+  when: host_commands | length > 0
+
 - name: Get size of the backup directory
   ansible.builtin.shell: du -sh "{{ backup_destination }}" | cut -f1
   register: backup_size_result

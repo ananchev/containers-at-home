@@ -5,6 +5,7 @@ application_hosts:
     - fed
     - unas
     - bnod
+    - vhost
   energy-meters: fed
   grafana: fed
   guacamole: fed
@@ -26,3 +27,4 @@ application_hosts:
   borg-ui: bnod
   caddy: bnod
   passbolt-recovery: bnod
+  immich: vhost

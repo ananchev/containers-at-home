@@ -2,3 +2,4 @@
 
 ansible_user: ananchev
 ssh_private_key: "{{ coreos_ssh_private_key }}"
+docker_data_root: /opt/docker

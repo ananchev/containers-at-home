@@ -165,6 +165,26 @@ backup_definitions:
       - source_path: /tmp/backup.tar.gz
         target_filename: backup.tar.gz
 
+  - application: immich
+    container: immich-postgres
+    backup_commands:
+      - pg_dump --clean --if-exists --dbname={{ immich_db_database }} --username={{ immich_db_username }} -f /tmp/immich_db.sql
+      - gzip -f /tmp/immich_db.sql
+    copy_actions:
+      - source_path: /tmp/immich_db.sql.gz
+        target_filename: immich_db.sql.gz
+
+  - application: immich
+    container: immich-server
+    backup_commands: []
+    host_commands:
+      - >-
+        rsync -a --delete
+        -e "ssh -i /home/{{ ansible_user }}/.ssh/immich_backup_key -o StrictHostKeyChecking=no"
+        {{ docker_data_root }}/immich/media/
+        {{ backup_user }}@{{ large_backups_host }}:{{ large_backups_location }}/immich
+    copy_actions: []
+
   - application: caddy
     container: caddy
     backup_commands:

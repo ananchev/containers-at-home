@@ -1,0 +1,127 @@
+- hosts: homelab
+  become: true
+  gather_facts: False
+  vars:
+    application: immich
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    docker_network: "{{ application }}-net"
+    local_backup_folder: "{{ application_data }}/{{ application }}"
+
+  tasks:
+    - name: Run only on the on the designated host
+      block:
+      - name: Create directories
+        file:
+          path: "{{ item }}"
+          state: directory
+          mode: '0755'
+        loop:
+          - "{{ host_directory }}"
+          - "{{ host_directory }}/postgres"
+          - "{{ host_directory }}/model-cache"
+          - "{{ host_directory }}/media"
+
+      - name: Check if database backup files exist locally
+        set_fact:
+          immich_backup_exists: "{{ (local_backup_folder + '/immich_db.sql.gz') is file }}"
+
+      - name: Copy the db backup to the remote machine
+        ansible.builtin.copy:
+          src: "{{ local_backup_folder }}/immich_db.sql.gz"
+          dest: /tmp/immich_db.sql.gz
+        when: immich_backup_exists
+
+      - name: Create docker network for Immich containers
+        community.docker.docker_network:
+          name: "{{ docker_network }}"
+          driver: bridge
+          state: present
+
+      - name: Run valkey container
+        community.docker.docker_container:
+          name: "{{ application }}-valkey"
+          hostname: "{{ application }}-valkey"
+          image: "{{ app_versions[application + '-valkey'].image }}"
+          network_mode: "{{ docker_network }}"
+          detach: true
+          restart_policy: unless-stopped
+
+      - name: Run Postgres container
+        community.docker.docker_container:
+          name: "{{ application }}-postgres"
+          hostname: "{{ application }}-postgres"
+          image: "{{ app_versions[application + '-postgres'].image }}"
+          network_mode: "{{ docker_network }}"
+          detach: true
+          restart_policy: unless-stopped
+          shm_size: 128m
+          env:
+            POSTGRES_PASSWORD: "{{ immich_db_password }}"
+            POSTGRES_USER: "{{ immich_db_username }}"
+            POSTGRES_DB: "{{ immich_db_database }}"
+            POSTGRES_INITDB_ARGS: '--data-checksums'
+          volumes:
+            - "{{ host_directory }}/postgres:/var/lib/postgresql/data:Z"
+
+      - name: Wait for Postgres to be ready
+        pause:
+          seconds: 5
+
+      - name: Restore database from backup
+        when: immich_backup_exists
+        block:
+          - name: Restore the immich database from backup
+            ansible.builtin.shell: |
+              gunzip --stdout /tmp/immich_db.sql.gz \
+              | sed "s/SELECT pg_catalog.set_config('search_path', '', false);/SELECT pg_catalog.set_config('search_path', 'public, pg_catalog', true);/g" \
+              | docker exec -i {{ application }}-postgres psql --dbname={{ immich_db_database }} --username={{ immich_db_username }} --single-transaction --set ON_ERROR_STOP=on
+            args:
+              executable: /bin/bash
+
+      - name: Run machine learning container
+        community.docker.docker_container:
+          name: "{{ application }}-machine-learning"
+          hostname: "{{ application }}-machine-learning"
+          image: "{{ app_versions[application + '-machine-learning'].image }}"
+          network_mode: "{{ docker_network }}"
+          detach: true
+          restart_policy: unless-stopped
+          volumes:
+            - "{{ host_directory }}/model-cache:/cache:Z"
+          env:
+            TZ: "Europe/Amsterdam"
+
+      - name: Run Immich server container
+        community.docker.docker_container:
+          name: "{{ application }}-server"
+          hostname: "{{ application }}-server"
+          image: "{{ app_versions[application + '-server'].image }}"
+          network_mode: "{{ docker_network }}"
+          detach: true
+          restart_policy: unless-stopped
+          ports:
+            - "2283:2283"
+          volumes:
+            - "{{ host_directory }}/media:/data:Z"
+          mounts:
+            - source: /etc/localtime
+              target: /etc/localtime
+              type: bind
+              read_only: yes
+          env:
+            DB_HOSTNAME: "{{ application }}-postgres"
+            DB_USERNAME: "{{ immich_db_username }}"
+            DB_PASSWORD: "{{ immich_db_password }}"
+            DB_DATABASE_NAME: "{{ immich_db_database }}"
+            REDIS_HOSTNAME: "{{ application }}-valkey"
+            TZ: "Europe/Amsterdam"
+
+      - name: Deploy backup SSH private key
+        copy:
+          content: "{{ backup_private_key }}"
+          dest: /home/{{ ansible_user }}/.ssh/immich_backup_key
+          mode: '0600'
+        become: true
+        become_user: "{{ ansible_user }}"
+
+      when: inventory_hostname in application_hosts['immich']

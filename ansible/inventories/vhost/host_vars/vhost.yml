@@ -1,0 +1,6 @@
+# Host-specific vars for vhost
+
+ansible_user: ananchev
+ssh_private_key: "{{ vhost_ssh_private_key }}"
+docker_data_root: /nvme/containers   # local NVMe for containes databases, cache, etc.
+filestore_root: /nas                 # bulk storage over NFS

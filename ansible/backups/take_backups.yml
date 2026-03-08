@@ -38,7 +38,8 @@
         application_name: "{{ item.application }}"
         container: "{{ item.container }}"
         backup_commands: "{{ item.backup_commands }}"
-        copy_actions: "{{ item.copy_actions }}"  
+        copy_actions: "{{ item.copy_actions }}"
+        host_commands: "{{ item.host_commands | default([]) }}"
         backup_destination: "{{ backups_directory }}/{{ backup_timestamp }}/{{ application_name }}"
     
     - name: Ensure no temporary private key to auth on the backups target host exists
@@ -48,7 +49,7 @@
 
     - name: Create private key file on target host from Ansible Vault variable
       copy:
-        content: "{{ backup_sftp_private_key }}"
+        content: "{{ backup_private_key }}"
         dest: "{{ backups_temporary_private_key_file }}"
         mode: '0600'
       become: true
@@ -59,7 +60,7 @@
         msg:
           - "Source directory: {{ backups_directory }}"
           - "ZFS host: {{ zfs_backup_target_host }}"
-          - "ZFS user: {{ zfs_backup_user }}"
+          - "ZFS user: {{ backup_user }}"
           - "ZFS Destination directory: {{ zfs_backup_target_location }}"
           - "Private key file: {{ backups_temporary_private_key_file }}"
 
@@ -68,7 +69,7 @@
         rsync -av -c --itemize-changes
         -e "ssh -i {{ backups_temporary_private_key_file }} -o StrictHostKeyChecking=no"
         {{ backups_directory }}/{{ backup_timestamp }}/
-        {{ zfs_backup_user }}@{{ zfs_backup_target_host }}:{{ zfs_backup_target_location }}
+        {{ backup_user }}@{{ zfs_backup_target_host }}:{{ zfs_backup_target_location }}
       when: zfs_backup_target_host is defined
       register: rsync_result
 
@@ -78,7 +79,7 @@
         remote_command: >
           ssh -i "{{ backups_temporary_private_key_file }}" 
           -o StrictHostKeyChecking=no 
-          "{{ zfs_backup_user }}@{{ zfs_backup_target_host }}"
+          "{{ backup_user }}@{{ zfs_backup_target_host }}"
           "mkdir -p {{ zfs_backup_target_location }}/.status && touch {{ status_file }}"
       ansible.builtin.shell: "{{ remote_command }}"
       when: 
