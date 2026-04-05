@@ -8,3 +8,14 @@ zfs_backup_target_location: /mnt/zfspool/containers-backup/
 large_backups_host: 10.10.10.1 # large backups always go from vhost to nas via the 2.5gbps link
 large_backups_location: /mnt/disk1/filestore/ # for large backup we rsync directly to the NAS share, instead of zfs 
 application_data: /Users/ananchev/Development/containers-at-home/application_data
+
+# Borg backup repos define what gets backed up to the remote borg host
+borg_remote_base_path: /backups-pool  # aligns with borg-ui's /backups-pool:/repo:rw mount
+borg_remote_zfs_dataset: backups-pool  # ZFS dataset on the remote borg host to snapshot after borg completes
+borg_repos:
+  - name: containers-backup
+    source: "{{ zfs_backup_target_location }}"
+    use_snapshot: true  # back containers in borg from the frozen ZFS snapshot rather than the live dataset
+  - name: immich
+    source: "{{ large_backups_location }}immich"
+    use_snapshot: false  # immich backup is on the array not ZFS, so no snapshot possible

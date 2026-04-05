@@ -155,4 +155,72 @@ done
 echo "Resetting status flags for tomorrow..."
 rm -f "$STATUS_DIR"/*.ready
 
+# ==============================================================================
+# STEP 6: BORG BACKUPS
+# ==============================================================================
+export BORG_RSH="ssh -i /etc/backup-manager/borg_ssh_key -o StrictHostKeyChecking=no -o BatchMode=yes"
+export BORG_PASSCOMMAND="cat /etc/backup-manager/borg_passphrase"
+
+{% for repo in borg_repos %}
+echo "--- Borg backup: {{ repo.name }} ---"
+BORG_REPO="ssh://{{ borg_remote_user }}@{{ borg_remote_host }}:{{ borg_remote_ssh_port }}{{ borg_remote_base_path }}/{{ repo.name }}"
+
+{% if repo.use_snapshot | default(false) %}
+BORG_SOURCE="$SNAPSHOT_SRC"
+{% else %}
+BORG_SOURCE="{{ repo.source }}"
+{% endif %}
+    
+if [ "$DRY_RUN" = "true" ]; then
+    echo "[DRY RUN] Would borg create $BORG_REPO::$(date +%Y-%m-%d) from $BORG_SOURCE"
+    echo "[DRY RUN] Would borg prune $BORG_REPO (keep-daily=7, keep-weekly=4, keep-monthly=6)"
+else
+    borg create --stats --compression lz4 \
+        "$BORG_REPO::$(date +%Y-%m-%d)" \
+        "$BORG_SOURCE"
+    echo "Borg backup complete: {{ repo.name }}"
+    borg prune --keep-daily=7 --keep-weekly=4 --keep-monthly=6 "$BORG_REPO"
+    echo "Borg prune complete: {{ repo.name }}"
+fi
+{% endfor %}
+
 echo "Backup process finished successfully."
+
+# ==============================================================================
+# STEP 7: ZFS SNAPSHOT ON REMOTE BORG HOST
+# ==============================================================================
+echo "--- ZFS Snapshot on remote borg host ---"
+if [ "$DRY_RUN" = "true" ]; then
+    echo "[DRY RUN] Would snapshot {{ borg_remote_zfs_dataset }}@borg-$(date +%Y-%m-%d) on {{ borg_remote_host }}"
+    echo "[DRY RUN] Would cleanup old borg snapshots on {{ borg_remote_host }} (retention: $ZFS_RETENTION_DAYS days)"
+else
+    ssh -i /etc/backup-manager/borg_ssh_key \
+        -p {{ borg_remote_ssh_port }} \
+        -o StrictHostKeyChecking=no \
+        -o BatchMode=yes \
+        {{ borg_remote_user }}@{{ borg_remote_host }} \
+        "zfs snapshot {{ borg_remote_zfs_dataset }}@borg-$(date +%Y-%m-%d)"
+    echo "Remote ZFS snapshot created: {{ borg_remote_zfs_dataset }}@borg-$(date +%Y-%m-%d)"
+
+    echo "--- Remote ZFS Snapshot Cleanup (Retention: $ZFS_RETENTION_DAYS days) ---"
+    OLD_REMOTE_SNAPSHOTS=$(ssh -i /etc/backup-manager/borg_ssh_key \
+        -p {{ borg_remote_ssh_port }} \
+        -o StrictHostKeyChecking=no \
+        -o BatchMode=yes \
+        {{ borg_remote_user }}@{{ borg_remote_host }} \
+        "zfs list -H -t snapshot -o name -s creation -d 1 {{ borg_remote_zfs_dataset }} | head -n -${ZFS_RETENTION_DAYS}")
+
+    if [ -z "$OLD_REMOTE_SNAPSHOTS" ]; then
+        echo "No old remote snapshots to remove."
+    else
+        for snap in $OLD_REMOTE_SNAPSHOTS; do
+            ssh -i /etc/backup-manager/borg_ssh_key \
+                -p {{ borg_remote_ssh_port }} \
+                -o StrictHostKeyChecking=no \
+                -o BatchMode=yes \
+                {{ borg_remote_user }}@{{ borg_remote_host }} \
+                "zfs destroy -r $snap"
+            echo "Destroyed remote snapshot: $snap"
+        done
+    fi
+fi

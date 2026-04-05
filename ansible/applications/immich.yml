@@ -121,6 +121,7 @@
           content: "{{ backup_private_key }}"
           dest: /home/{{ ansible_user }}/.ssh/immich_backup_key
           mode: '0600'
+          setype: ssh_home_t
         become: true
         become_user: "{{ ansible_user }}"
 

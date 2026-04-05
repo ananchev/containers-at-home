@@ -4,12 +4,12 @@
   vars:
     application: backup-manager
     container_name: "{{ application }}-node"
-    dry_run: false
+    dry_run: false 
 
     dockerfile: |
       FROM alpine:latest
       # Install dependencies, tzdata for local time, and coreutils for advanced date/touch math
-      RUN apk add --no-cache zfs bash rsync tzdata coreutils
+      RUN apk add --no-cache zfs bash rsync tzdata coreutils borgbackup openssh-client
       
       # Set Timezone to ensure cron runs at the expected local hour
       ENV TZ=Europe/Amsterdam
@@ -18,6 +18,9 @@
       # Setup the script
       COPY backup-manager.sh /usr/local/bin/backup-manager.sh
       RUN chmod +x /usr/local/bin/backup-manager.sh
+      
+      # Create directory for borg credentials (populated at deploy time via docker cp)
+      RUN mkdir -p /etc/backup-manager && chmod 700 /etc/backup-manager
       
       # Configure Cron to run at 04:00 and pipe output to Docker logs
       RUN echo "0 4 * * * /usr/local/bin/backup-manager.sh >> /proc/1/fd/1 2>&1" > /etc/crontabs/root
@@ -40,11 +43,12 @@
       - { source: /dev/zfs, target: /dev/zfs, type: bind }
       - { source: "{{ script_vars.unraid_array_path }}", target: "{{ script_vars.unraid_array_path }}", type: bind }
       - { source: "{{ script_vars.zfs_backup_path }}", target: "{{ script_vars.zfs_backup_path }}", type: bind, propagation: slave }
+      - { source: "{{ large_backups_location }}", target: "{{ large_backups_location }}", type: bind, read_only: yes }
 
   tasks:
     - name: Run only on the designated host
       block:
-      
+
       - name: Stop and remove existing container
         community.docker.docker_container:
           name: "{{ container_name }}"
@@ -54,7 +58,7 @@
         ansible.builtin.file:
           path: "/tmp/backup-manager-build"
           state: directory
-          mode: '0755'
+          mode: '0700'
 
       - name: Template the backup script into the build directory
         ansible.builtin.template:
@@ -70,8 +74,19 @@
           unraid_weekly_retention: "{{ script_vars.unraid_weekly_retention }}"
           unraid_monthly_retention: "{{ script_vars.unraid_monthly_retention }}"
           all_backup_nodes: "{{ application_hosts['containers-backup'] | join(' ') }}"
-          dry_run: "{{ dry_run }}"
       
+      - name: Write borg SSH key into the build directory
+        ansible.builtin.copy:
+          content: "{{ borg_ssh_key }}"
+          dest: /tmp/backup-manager-build/borg_ssh_key
+          mode: '0600'
+
+      - name: Write borg passphrase into the build directory
+        ansible.builtin.copy:
+          content: "{{ borg_passphrase }}"
+          dest: /tmp/backup-manager-build/borg_passphrase
+          mode: '0600'
+
       - name: Write the inline Dockerfile to the temp directory
         ansible.builtin.copy:
           content: "{{ dockerfile }}"
@@ -99,6 +114,18 @@
       - name: Copy the backup script into the container
         ansible.builtin.command:
           cmd: docker cp /tmp/backup-manager-build/backup-manager.sh {{ container_name }}:/usr/local/bin/backup-manager.sh
+
+      - name: Copy borg SSH key into the container
+        ansible.builtin.command:
+          cmd: docker cp /tmp/backup-manager-build/borg_ssh_key {{ container_name }}:/etc/backup-manager/borg_ssh_key
+
+      - name: Copy borg passphrase into the container
+        ansible.builtin.command:
+          cmd: docker cp /tmp/backup-manager-build/borg_passphrase {{ container_name }}:/etc/backup-manager/borg_passphrase
+
+      - name: Set correct permissions on borg credentials inside the container
+        ansible.builtin.command:
+          cmd: docker exec {{ container_name }} sh -c 'chmod 600 /etc/backup-manager/borg_ssh_key /etc/backup-manager/borg_passphrase'
 
       - name: Clean up the temporary directory
         ansible.builtin.file:

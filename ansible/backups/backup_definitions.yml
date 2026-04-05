@@ -179,10 +179,11 @@ backup_definitions:
     backup_commands: []
     host_commands:
       - >-
-        rsync -a --delete
+        rsync -av --delete
         -e "ssh -i /home/{{ ansible_user }}/.ssh/immich_backup_key -o StrictHostKeyChecking=no"
         {{ docker_data_root }}/immich/media/
         {{ backup_user }}@{{ large_backups_host }}:{{ large_backups_location }}/immich
+        > /tmp/immich_rsync.log 2>&1
     copy_actions: []
 
   - application: caddy
