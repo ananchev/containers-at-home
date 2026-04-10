@@ -4,7 +4,35 @@
   vars:
     application: cycling-coach
     host_directory: "{{ docker_data_root }}/{{ application }}"
-    container_name: cycling-coach
+    docker_network: cycling-coach-net
+    env_vars:
+      cycling_coach:
+        WAHOO_CLIENT_ID: "{{ cycling_coach.wahoo.client_id }}"
+        WAHOO_CLIENT_SECRET: "{{ cycling_coach.wahoo.client_secret }}"
+        WAHOO_REDIRECT_URI: "{{ cycling_coach.wahoo.redirect_uri }}"
+        WAHOO_WEBHOOK_SECRET: "{{ cycling_coach.wahoo.webhook_secret }}"
+        TELEGRAM_BOT_TOKEN: "{{ cycling_coach.telegram.bot_token }}"
+        TELEGRAM_CHAT_ID: "{{ cycling_coach.telegram.chat_id }}"
+        ANTHROPIC_API_KEY: "{{ cycling_coach.anthropic.api_key }}"
+        WYZE_SIDECAR_URL: http://wyze-sidecar:8090
+        SERVER_ADDR: "{{ cycling_coach.server.addr }}"
+        BASE_URL: "{{ cycling_coach.server.base_url }}"
+        DATABASE_PATH: "/data/cycling.db"
+        FIT_FILES_PATH: "/data/fit_files/"
+        ATHLETE_PROFILE_PATH: "/data/athlete-profile.md"
+        TZ: Europe/Amsterdam
+        # When cron job is commented out, the corresponding task will not be scheduled
+        # Action can still be performed by the admin UI or cURL command
+        CRON_SYNC: "0 */4 * * *" # scheduler-triggered Wahoo sync (limited to last 7 days, full sync through UI or API)
+        CRON_FIT_PROCESSING: "*/15 * * * *"
+        # CRON_WEEKLY_REPORT: "0 20 * * 0"
+        CRON_WYZE_SCALE_SYNC: "5 0 * * *" 
+      wyze_sidecar:
+        WYZE_EMAIL: "{{ cycling_coach.wyze_sidecar.email }}"
+        WYZE_PASSWORD: "{{ cycling_coach.wyze_sidecar.password }}"
+        WYZE_KEY_ID: "{{ cycling_coach.wyze_sidecar.key_id }}"
+        WYZE_API_KEY: "{{ cycling_coach.wyze_sidecar.api_key }}"
+        WYZE_TOTP_KEY: "{{ cycling_coach.wyze_sidecar.totp_key }}" # Optional, for accounts with 2FA enabled
     local_backup_folder: "{{ application_data }}/{{ application }}"
 
   tasks:
@@ -42,30 +70,19 @@
         - name: Cleanup the non-tagged images
           ansible.builtin.command: docker image prune -f
 
-        - name: Run the container
+        - name: Create the docker network
+          community.docker.docker_network:
+            name: "{{ docker_network }}"
+            driver: bridge
+            state: present
+
+        - name: Run the cycling-coach container
           community.docker.docker_container:
             name: cycling-coach
             detach: true
             image: cycling-coach:latest
-            env:
-              WAHOO_CLIENT_ID: "{{ cycling_coach.wahoo.client_id }}"
-              WAHOO_CLIENT_SECRET: "{{ cycling_coach.wahoo.client_secret }}"
-              WAHOO_REDIRECT_URI: "{{ cycling_coach.wahoo.redirect_uri }}"
-              WAHOO_WEBHOOK_SECRET: "{{ cycling_coach.wahoo.webhook_secret }}"
-              TELEGRAM_BOT_TOKEN: "{{ cycling_coach.telegram.bot_token }}"
-              TELEGRAM_CHAT_ID: "{{ cycling_coach.telegram.chat_id }}"
-              ANTHROPIC_API_KEY: "{{ cycling_coach.anthropic.api_key }}"
-              SERVER_ADDR: "{{ cycling_coach.server.addr }}"
-              BASE_URL: "{{ cycling_coach.server.base_url }}"
-              DATABASE_PATH: "/data/cycling.db"
-              FIT_FILES_PATH: "/data/fit_files/"
-              ATHLETE_PROFILE_PATH: "/data/athlete-profile.md"
-              TZ: Europe/Amsterdam
-              # When cron job is commented out, the corresponding task will not be scheduled
-              # Action can still be performed by the admin UI or cURL command
-              CRON_SYNC: "0 */4 * * *" # scheduler-triggered Wahoo sync (limited to last 7 days, full sync through UI or API)
-              CRON_FIT_PROCESSING: "*/15 * * * *"
-              # CRON_WEEKLY_REPORT: "0 20 * * 0"
+            network_mode: "{{ docker_network }}"
+            env: "{{ env_vars.cycling_coach }}"
             mounts:
               - source: /etc/localtime
                 target: /etc/localtime
@@ -76,4 +93,28 @@
             volumes:
               - "{{ host_directory }}:/data"
             restart_policy: unless-stopped
+
+        - name: Build the wyze-sidecar image 
+          community.docker.docker_image:
+            source: build
+            build:
+              path: "{{ host_directory }}/source/wyze_sidecar"
+              rm: true
+            name: wyze-sidecar:latest
+
+        - name: Run the wyze-sidecar container
+          community.docker.docker_container:
+            name: wyze-sidecar
+            hostname: wyze-sidecar
+            detach: true
+            image: wyze-sidecar:latest
+            network_mode: "{{ docker_network }}"
+            env: "{{ env_vars.wyze_sidecar }}"
+            mounts:
+              - source: /etc/localtime
+                target: /etc/localtime
+                type: bind
+                read_only: yes
+            restart_policy: unless-stopped
+
       when: inventory_hostname in application_hosts['cycling-coach']
