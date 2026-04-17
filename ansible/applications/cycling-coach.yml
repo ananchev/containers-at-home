@@ -44,15 +44,24 @@
             state: directory
             mode: '0755'
 
+        - name: Check if backup archive exists locally
+          ansible.builtin.stat:
+            path: "{{ local_backup_folder }}/backup.tar.gz"
+          delegate_to: localhost
+          become: false
+          register: backup_archive
+
         - name: Copy the backup archive to the remote machine
           ansible.builtin.copy:
             src: "{{ local_backup_folder }}/backup.tar.gz"
             dest: "/tmp"
+          when: backup_archive.stat.exists
 
         - name: Unzip file into the existing folder
           ansible.builtin.command: >
             tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}
           become: true
+          when: backup_archive.stat.exists
         
         - name: Clone the repository
           git:
