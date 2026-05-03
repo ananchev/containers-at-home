@@ -29,3 +29,4 @@ application_hosts:
   passbolt-recovery: bnod
   immich: vhost
   cycling-coach: unas
+  arr-stack: unas

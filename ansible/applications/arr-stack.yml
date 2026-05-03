@@ -1,0 +1,51 @@
+---
+- hosts: homelab
+  become: true
+  gather_facts: False
+  vars:
+    arr_apps:
+      - name: radarr
+        port: 7878
+      - name: sonarr
+        port: 8989
+      - name: bazarr
+        port: 6767
+
+  tasks:
+    - name: Run only on the designated host
+      when: inventory_hostname in application_hosts['arr-stack']
+      block:
+      - name: Create directory
+        file:
+          path: "{{ docker_data_root }}/{{ item.name }}/config"
+          state: directory
+          mode: '0755'
+        loop: "{{ arr_apps }}"
+
+      - name: Copy the backup archive to the remote machine
+        ansible.builtin.copy:
+          src: "{{ application_data }}/{{ item.name }}/backup.tar.gz"
+          dest: "/tmp/{{ item.name }}-backup.tar.gz"
+        loop: "{{ arr_apps }}"
+
+      - name: Unzip file into the existing folder
+        ansible.builtin.command: >
+          tar -xzvf /tmp/{{ item.name }}-backup.tar.gz -C {{ docker_data_root }}/{{ item.name }}/config
+        loop: "{{ arr_apps }}"
+
+      - name: Run the container
+        community.docker.docker_container:
+          name: "{{ item.name }}"
+          image: "{{ app_versions[item.name].image }}"
+          detach: true
+          ports:
+            - "{{ item.port }}:{{ item.port }}"
+          volumes:
+            - "{{ docker_data_root }}/{{ item.name }}/config:/config"
+            - "/mnt/disk1/media:/media"
+          restart_policy: unless-stopped
+          env:
+            PUID: "99"
+            PGID: "100"
+            TZ: "Europe/Amsterdam"
+        loop: "{{ arr_apps }}"
