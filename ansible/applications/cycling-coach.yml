@@ -11,12 +11,13 @@
         WAHOO_CLIENT_SECRET: "{{ cycling_coach.wahoo.client_secret }}"
         WAHOO_REDIRECT_URI: "{{ cycling_coach.wahoo.redirect_uri }}"
         WAHOO_WEBHOOK_SECRET: "{{ cycling_coach.wahoo.webhook_secret }}"
+        MCP_API_KEY: "{{ cycling_coach.mcp.api_key }}"
         TELEGRAM_BOT_TOKEN: "{{ cycling_coach.telegram.bot_token }}"
         TELEGRAM_CHAT_ID: "{{ cycling_coach.telegram.chat_id }}"
         ANTHROPIC_API_KEY: "{{ cycling_coach.anthropic.api_key }}"
         WYZE_SIDECAR_URL: http://wyze-sidecar:8090
         SERVER_ADDR: "{{ cycling_coach.server.addr }}"
-        BASE_URL: "{{ cycling_coach.server.base_url }}"
+        BASE_URL: "{{ cycling_coach.server.url }}"
         DATABASE_PATH: "/data/cycling.db"
         FIT_FILES_PATH: "/data/fit_files/"
         ATHLETE_PROFILE_PATH: "/data/athlete-profile.md"
@@ -26,13 +27,24 @@
         CRON_SYNC: "0 */4 * * *" # scheduler-triggered Wahoo sync (limited to last 7 days, full sync through UI or API)
         CRON_FIT_PROCESSING: "*/15 * * * *"
         # CRON_WEEKLY_REPORT: "0 20 * * 0"
-        CRON_WYZE_SCALE_SYNC: "5 0 * * *" 
+        CRON_WYZE_SCALE_SYNC: "*/60 * * * *" 
       wyze_sidecar:
         WYZE_EMAIL: "{{ cycling_coach.wyze_sidecar.email }}"
         WYZE_PASSWORD: "{{ cycling_coach.wyze_sidecar.password }}"
         WYZE_KEY_ID: "{{ cycling_coach.wyze_sidecar.key_id }}"
         WYZE_API_KEY: "{{ cycling_coach.wyze_sidecar.api_key }}"
         WYZE_TOTP_KEY: "{{ cycling_coach.wyze_sidecar.totp_key }}" # Optional, for accounts with 2FA enabled
+      mcp_server:
+        MCP_APP_BASE_URL: "{{ cycling_coach.server.url }}"
+        MCP_APP_CLIENT_CERT: /app/certs/client.cert
+        MCP_APP_CLIENT_KEY: /app/certs/client.key
+        MCP_APP_API_KEY: "{{ cycling_coach.mcp.api_key }}"
+        MCP_PUBLIC_URL: "{{ cycling_coach.mcp.url }}"
+        MCP_OAUTH_USER: "{{ cycling_coach.mcp.oauth_user }}"
+        MCP_OAUTH_PASSWORD: "{{ cycling_coach.mcp.oauth_password }}"
+        MCP_OAUTH_SIGNING_KEY: "{{ cycling_coach.mcp.oauth_signing_key }}"
+        MCP_OAUTH_TOKEN_TTL: "1h"
+        MCP_OAUTH_ALLOWED_REDIRECTS: "{{ cycling_coach.mcp.allowed_redirects }}"
     local_backup_folder: "{{ application_data }}/{{ application }}"
 
   tasks:
@@ -44,25 +56,16 @@
             state: directory
             mode: '0755'
 
-        - name: Check if backup archive exists locally
-          ansible.builtin.stat:
-            path: "{{ local_backup_folder }}/backup.tar.gz"
-          delegate_to: localhost
-          become: false
-          register: backup_archive
-
         - name: Copy the backup archive to the remote machine
           ansible.builtin.copy:
             src: "{{ local_backup_folder }}/backup.tar.gz"
             dest: "/tmp"
-          when: backup_archive.stat.exists
 
         - name: Unzip file into the existing folder
           ansible.builtin.command: >
             tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}
           become: true
-          when: backup_archive.stat.exists
-        
+
         - name: Clone the repository
           git:
               repo: 'https://github.com/ananchev/cycling-coach.git' 
@@ -124,6 +127,50 @@
                 target: /etc/localtime
                 type: bind
                 read_only: yes
+            restart_policy: unless-stopped
+        
+        - name: Create mcp-client-certs directory
+          ansible.builtin.file:
+            path: "{{ host_directory }}/mcp-client-certs"
+            state: directory
+            mode: '0700'
+
+        - name: Seed the client cert for mcp-server to access the coach application
+          ansible.builtin.copy:
+            dest: "{{ item.dest }}"
+            content: "{{ item.content }}"
+            force: false
+          loop:
+            - dest: "{{ host_directory }}/mcp-client-certs/client.cert"
+              content: "{{ cycling_coach.mcp.cloudflare_client_cert }}"
+            - dest: "{{ host_directory }}/mcp-client-certs/client.key"
+              content: "{{ cycling_coach.mcp.cloudflare_client_cert_key }}"
+
+        - name: Build the mcp-server image 
+          community.docker.docker_image:
+            source: build
+            build:
+              path: "{{ host_directory }}/source/mcp-server"
+              rm: true
+            name: mcp-server:latest
+
+        - name: Run the mcp-server container
+          community.docker.docker_container:
+            name: mcp-server
+            hostname: mcp-server
+            detach: true
+            image: mcp-server:latest
+            network_mode: "{{ docker_network }}"
+            env: "{{ env_vars.mcp_server }}"
+            mounts:
+              - source: /etc/localtime
+                target: /etc/localtime
+                type: bind
+                read_only: yes
+            ports:
+              - "8091:8091/tcp"
+            volumes:
+              - "{{ host_directory }}/mcp-client-certs:/app/certs:ro"
             restart_policy: unless-stopped
 
       when: inventory_hostname in application_hosts['cycling-coach']
