@@ -5,6 +5,8 @@
     application: nginx-proxy-manager
     host_directory: "{{ docker_data_root }}/{{ application }}"
     container_name: "{{ application }}"
+    custom_image_name: "{{ application }}-with-atd"
+    build_directory: "/tmp/{{ application }}-build"
     local_backup_folder: "{{ application_data }}/{{ application }}"
   
   tasks:
@@ -17,6 +19,7 @@
           mode: '0755'
         loop:
           - "{{ host_directory }}"
+          - "{{ build_directory }}"
 
       - block:
         - name: Copy the archive to the remote machine
@@ -29,11 +32,56 @@
           become: true
         when: local_backup_folder is defined and local_backup_folder is not none
 
+      - name: Create Dockerfile for the custom nginx-proxy-manager image
+        # this image adds the atd package and a watchdog script
+        # to flip between dev and prod modes of cycling coach
+        ansible.builtin.copy:
+          dest: "{{ build_directory }}/Dockerfile"
+          mode: '0644'
+          content: |
+            FROM {{ app_versions['nginx-proxy-manager']['image'] }}
+            RUN apt-get update \
+                && apt-get install -y --no-install-recommends at \
+                && apt-get clean \
+                && rm -rf /var/lib/apt/lists/*
+            ADD https://raw.githubusercontent.com/ananchev/cycling-coach/master/scripts/dev/watchdog.sh \
+                /usr/local/bin/coach-dev-flip-prod
+            RUN mkdir -p /etc/coach-dev /var/lib/coach-dev \
+                && chmod 0700 /var/lib/coach-dev
+            COPY start-with-atd.sh /usr/local/bin/start-with-atd.sh
+            ENTRYPOINT ["/usr/local/bin/start-with-atd.sh"]
+
+      - name: Create entrypoint wrapper for nginx-proxy-manager
+        ansible.builtin.copy:
+          dest: "{{ build_directory }}/start-with-atd.sh"
+          mode: '0755'
+          content: |
+            #!/bin/sh
+            set -eu
+            if command -v service >/dev/null 2>&1; then
+              service atd start
+            else
+              /usr/sbin/atd
+            fi
+            chmod 0755 /usr/local/bin/coach-dev-flip-prod 2>/dev/null || true
+            exec /init
+
+      - name: Build custom nginx-proxy-manager image
+        community.docker.docker_image:
+          name: "{{ custom_image_name }}"
+          source: build
+          build:
+            path: "{{ build_directory }}"
+            dockerfile: Dockerfile
+            pull: true
+            rm: true
+          state: present
+
       - name: Run the nginx-proxy-manager container
         community.docker.docker_container:
           name: "{{ container_name }}"
           detach: true
-          image: "{{ app_versions['nginx-proxy-manager']['image'] }}"
+          image: "{{ custom_image_name }}"
           ports:
             - "80:80"  # Public HTTP Port
             - "443:443" # Public HTTPS Port
@@ -42,4 +90,23 @@
             - "{{ host_directory }}/data:/data:Z"
             - "{{ host_directory }}/letsencrypt:/etc/letsencrypt:Z"
           restart_policy: unless-stopped
+
+      - name: Template /etc/coach-dev/npm.env (secrets from vault)
+        community.docker.docker_container_exec:
+          container: "{{ container_name }}"
+          command: tee /etc/coach-dev/npm.env
+          stdin: |
+            NPM_BASE_URL=http://127.0.0.1:81
+            NPM_IDENTITY='{{ nginx_proxy_manager_admin_email }}'
+            NPM_SECRET='{{ nginx_proxy_manager_admin_password }}'
+            NPM_COACH_PROXY_ID={{ npm_coach_proxy_id | default(10) }}
+            NPM_MCP_PROXY_ID={{ npm_mcp_proxy_id | default(11) }}
+            ROLLBACK_FILE=/var/lib/coach-dev/rollback.json
+        no_log: true
+
+      - name: Lock down the env file for coach-dev
+        community.docker.docker_container_exec:
+          container: "{{ container_name }}"
+          command: chmod 0600 /etc/coach-dev/npm.env
+
       when: inventory_hostname in application_hosts['nginx-proxy-manager']
