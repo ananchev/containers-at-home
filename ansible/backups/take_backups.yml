@@ -14,7 +14,7 @@
     - name: Get current date and time on target host
       shell: |
         minutes=$(date +%M)
-        rounded_minutes=$(( (minutes / 10) * 10 ))
+        rounded_minutes=$(( (10#$minutes / 10) * 10 ))
         printf "%s%02d\n" $(date +%Y%m%d%H) $rounded_minutes
       register: current_time_result
 
@@ -33,7 +33,7 @@
       loop: "{{ backup_definitions }}"
       loop_control:
         label: "{{ item.application }}"
-      when: inventory_hostname in application_hosts[item.application]
+      when: inventory_hostname in application_hosts.get(item.application, [])
     
     - name: Ensure no temporary private key to auth on the backups target host exists
       file:
