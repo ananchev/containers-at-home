@@ -28,5 +28,5 @@ application_hosts:
   caddy: bnod
   passbolt-recovery: bnod
   immich: vhost
-  cycling-coach: unas
+  cycling-stack: unas
   arr-stack: unas

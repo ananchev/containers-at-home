@@ -1,0 +1,272 @@
+---
+- hosts: homelab
+  become: true
+  gather_facts: False
+  vars:
+    application: cycling-stack
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    docker_network: cycling-stack-net
+    common_mounts:
+      - source: /etc/localtime
+        target: /etc/localtime
+        type: bind
+        read_only: yes
+    env_vars:
+      cycling_coach:
+        WAHOO_CLIENT_ID: "{{ cycling_coach.wahoo.client_id }}"
+        WAHOO_CLIENT_SECRET: "{{ cycling_coach.wahoo.client_secret }}"
+        WAHOO_REDIRECT_URI: "{{ cycling_coach.wahoo.redirect_uri }}"
+        WAHOO_WEBHOOK_SECRET: "{{ cycling_coach.wahoo.webhook_secret }}"
+        MCP_API_KEY: "{{ cycling_coach.mcp.api_key }}"
+        MCP_PROMPT_WRITES_ENABLED: "true"
+        MCP_WRITABLE_PROMPTS: "all"
+        MCP_PLAN_WRITES_ENABLED: "true"
+        TELEGRAM_BOT_TOKEN: "{{ cycling_coach.telegram.bot_token }}"
+        TELEGRAM_CHAT_ID: "{{ cycling_coach.telegram.chat_id }}"
+        ANTHROPIC_API_KEY: "{{ cycling_coach.anthropic.api_key }}"
+        WYZE_SIDECAR_URL: http://wyze-sidecar:8090
+        SERVER_ADDR: "{{ cycling_coach.server.addr }}"
+        BASE_URL: "{{ cycling_coach.server.url }}"
+        DATABASE_PATH: "/data/cycling.db"
+        FIT_FILES_PATH: "/data/fit_files/"
+        PROMPTS_PATH: "/data/prompts/"
+        ATHLETE_PROFILE_PATH: "/data/athlete-profile.md"
+        TZ: Europe/Amsterdam
+        # When cron job is commented out, the corresponding task will not be scheduled
+        # Action can still be performed by the admin UI or cURL command
+        CRON_SYNC: "0 */4 * * *" # scheduler-triggered Wahoo sync (limited to last 7 days, full sync through UI or API)
+        CRON_FIT_PROCESSING: "*/15 * * * *"
+        # CRON_WEEKLY_REPORT: "0 20 * * 0"
+        CRON_WYZE_SCALE_SYNC: "*/60 * * * *"
+      wyze_sidecar:
+        WYZE_EMAIL: "{{ cycling_coach.wyze_sidecar.email }}"
+        WYZE_PASSWORD: "{{ cycling_coach.wyze_sidecar.password }}"
+        WYZE_KEY_ID: "{{ cycling_coach.wyze_sidecar.key_id }}"
+        WYZE_API_KEY: "{{ cycling_coach.wyze_sidecar.api_key }}"
+        WYZE_TOTP_KEY: "{{ cycling_coach.wyze_sidecar.totp_key }}" # Optional, for accounts with 2FA enabled
+      cycling_coach_mcp_server:
+        MCP_APP_BASE_URL: "{{ cycling_coach.server.url }}"
+        MCP_APP_CLIENT_CERT: /app/certs/client.cert
+        MCP_APP_CLIENT_KEY: /app/certs/client.key
+        MCP_APP_API_KEY: "{{ cycling_coach.mcp.api_key }}"
+        MCP_PUBLIC_URL: "{{ cycling_coach.mcp.url }}"
+        MCP_OAUTH_USER: "{{ cycling_coach.mcp.oauth_user }}"
+        MCP_OAUTH_PASSWORD: "{{ cycling_coach.mcp.oauth_password }}"
+        MCP_OAUTH_SIGNING_KEY: "{{ cycling_coach.mcp.oauth_signing_key }}"
+        MCP_OAUTH_TOKEN_TTL: "1h"
+        MCP_OAUTH_ALLOWED_REDIRECTS: "{{ cycling_coach.mcp.allowed_redirects }}"
+        MCP_PROMPT_WRITES_ENABLED: "true"
+        MCP_WRITABLE_PROMPTS: "all"
+        MCP_PLAN_WRITES_ENABLED: "true"
+      mcp_auth_server:
+        MCP_PUBLIC_URL: "{{ mcp_auth_server.public_url }}"
+        MCP_HTTP_ADDR: ":8092"
+        MCP_OAUTH_USER: "{{ mcp_auth_server.oauth_user }}"
+        MCP_OAUTH_PASSWORD: "{{ mcp_auth_server.oauth_password }}"
+        MCP_OAUTH_SIGNING_KEY: "{{ mcp_auth_server.oauth_signing_key }}"
+        MCP_OAUTH_TOKEN_TTL: "1h"
+        MCP_OAUTH_REFRESH_TTL: "720h"
+        MCP_OAUTH_ALLOWED_REDIRECTS: "{{ mcp_auth_server.allowed_redirects }}"
+        MCP_OAUTH_REFRESH_STORE: /data/refresh.json
+      healthbridge_backend:
+        HEALTHBRIDGE_DB: /data/health.duckdb
+        HEALTHBRIDGE_TOKEN: "{{ healthbridge.token }}"
+        HEALTHBRIDGE_SLEEP_SOURCE: "{{ healthbridge.sleep_source }}"
+        APP_ENV: prod
+      healthbridge_mcp_server:
+        HEALTHBRIDGE_DB: /data/health.duckdb
+        HEALTHBRIDGE_TZ: Europe/Amsterdam
+        MCP_PORT: "8001"
+        MCP_AUTH_SERVER_URL: "{{ mcp_auth_server.public_url }}"
+        MCP_PUBLIC_URL: "{{ healthbridge.mcp_public_url }}"
+        MCP_OAUTH_SIGNING_KEY: "{{ mcp_auth_server.oauth_signing_key }}"
+    cycling_stack_apps:
+      - name: cycling-coach
+        repo: https://github.com/ananchev/cycling-coach.git
+        source_path: "{{ host_directory }}/cycling-coach/source"
+        data_path: "{{ host_directory }}/cycling-coach/data"
+        backup_archive: "{{ application_data }}/cycling-stack/backup.tar.gz"
+        image: cycling-coach:latest
+        build:
+          path: "{{ host_directory }}/cycling-coach/source"
+        ports:
+          - "8088:8088/tcp"
+        env: "{{ env_vars.cycling_coach }}"
+        volumes:
+          - "{{ host_directory }}/cycling-coach/data:/data"
+
+      - name: wyze-sidecar
+        image: wyze-sidecar:latest
+        build:
+          path: "{{ host_directory }}/cycling-coach/source/wyze_sidecar"
+        hostname: wyze-sidecar
+        env: "{{ env_vars.wyze_sidecar }}"
+
+      - name: cycling-coach-mcp-server
+        image: cycling-coach-mcp-server:latest
+        build:
+          path: "{{ host_directory }}/cycling-coach/source/mcp-server"
+        hostname: cycling-coach-mcp-server
+        ports:
+          - "8091:8091/tcp"
+        env: "{{ env_vars.cycling_coach_mcp_server }}"
+        certs_path: "{{ host_directory }}/cycling-coach/mcp-client-certs"
+        cert_files:
+          - filename: client.cert
+            content: "{{ cycling_coach.mcp.cloudflare_client_cert }}"
+          - filename: client.key
+            content: "{{ cycling_coach.mcp.cloudflare_client_cert_key }}"
+        volumes:
+          - "{{ host_directory }}/cycling-coach/mcp-client-certs:/app/certs:ro"
+
+      - name: mcp-auth-server
+        repo: https://github.com/ananchev/mcp-auth.git
+        source_path: "{{ host_directory }}/mcp-auth/source"
+        data_path: "{{ host_directory }}/mcp-auth/data"
+        data_owner: "65532"
+        data_group: "65532"
+        data_mode: '0700'
+        backup_archive: "{{ application_data }}/cycling-stack/mcp-auth-backup.tar.gz"
+        image: mcp-auth-server:latest
+        build:
+          path: "{{ host_directory }}/mcp-auth/source"
+        ports:
+          - "8092:8092/tcp"
+        env: "{{ env_vars.mcp_auth_server }}"
+        volumes:
+          - "{{ host_directory }}/mcp-auth/data:/data"
+
+      - name: healthbridge-backend
+        repo: https://github.com/ananchev/healthbridge.git
+        source_path: "{{ host_directory }}/healthbridge/source"
+        data_path: "{{ host_directory }}/healthbridge/data"
+        backup_archive: "{{ application_data }}/cycling-stack/healthbridge-backup.tar.gz"
+        image: healthbridge-backend:latest
+        build:
+          path: "{{ host_directory }}/healthbridge/source/backend"
+          dockerfile: ../deploy/backend.Dockerfile
+        ports:
+          - "8000:8000/tcp"
+        env: "{{ env_vars.healthbridge_backend }}"
+        volumes:
+          - "{{ host_directory }}/healthbridge/data:/data"
+
+      - name: healthbridge-mcp-server
+        image: healthbridge-mcp-server:latest
+        build:
+          path: "{{ host_directory }}/healthbridge/source/mcp"
+          dockerfile: ../deploy/mcp.Dockerfile
+        ports:
+          - "8001:8001/tcp"
+        env: "{{ env_vars.healthbridge_mcp_server }}"
+        volumes:
+          - "{{ host_directory }}/healthbridge/data:/data:ro"
+
+  tasks:
+    - name: Run only on the designated host
+      when: inventory_hostname in application_hosts[application]
+      block:
+      - name: Create stack directory
+        file:
+          path: "{{ host_directory }}"
+          state: directory
+          mode: '0755'
+
+      - name: Create application data directories
+        file:
+          path: "{{ item.data_path }}"
+          state: directory
+          owner: "{{ item.data_owner | default(omit) }}"
+          group: "{{ item.data_group | default(omit) }}"
+          mode: "{{ item.data_mode | default('0755') }}"
+        loop: "{{ cycling_stack_apps | selectattr('data_path', 'defined') | list }}"
+
+      - name: Copy backup archives to the remote machine
+        ansible.builtin.copy:
+          src: "{{ item.backup_archive }}"
+          dest: "/tmp/{{ item.name }}-backup.tar.gz"
+        loop: "{{ cycling_stack_apps | selectattr('backup_archive', 'defined') | list }}"
+
+      - name: Unzip backup archives into the existing folders
+        ansible.builtin.command: >
+          tar -xzvf /tmp/{{ item.name }}-backup.tar.gz -C {{ item.data_path }}
+        become: true
+        loop: "{{ cycling_stack_apps | selectattr('backup_archive', 'defined') | list }}"
+
+      - name: Set application data ownership
+        file:
+          path: "{{ item.data_path }}"
+          state: directory
+          owner: "{{ item.data_owner }}"
+          group: "{{ item.data_group }}"
+          recurse: true
+        loop: "{{ cycling_stack_apps | selectattr('data_owner', 'defined') | list }}"
+
+      - name: Set application data directory modes
+        file:
+          path: "{{ item.data_path }}"
+          state: directory
+          mode: "{{ item.data_mode }}"
+        loop: "{{ cycling_stack_apps | selectattr('data_mode', 'defined') | list }}"
+
+      - name: Clone repositories
+        git:
+          repo: "{{ item.repo }}"
+          dest: "{{ item.source_path }}"
+        loop: "{{ cycling_stack_apps | selectattr('repo', 'defined') | list }}"
+
+      - name: Build images without custom Dockerfiles
+        community.docker.docker_image:
+          source: build
+          build:
+            path: "{{ item.build.path }}"
+            rm: true
+          name: "{{ item.image }}"
+        loop: "{{ cycling_stack_apps | selectattr('build', 'defined') | rejectattr('build.dockerfile', 'defined') | list }}"
+
+      - name: Build images with custom Dockerfiles
+        community.docker.docker_image:
+          source: build
+          build:
+            path: "{{ item.build.path }}"
+            dockerfile: "{{ item.build.dockerfile }}"
+            rm: true
+          name: "{{ item.image }}"
+        loop: "{{ cycling_stack_apps | selectattr('build.dockerfile', 'defined') | list }}"
+
+      - name: Cleanup the non-tagged images
+        ansible.builtin.command: docker image prune -f
+
+      - name: Create the docker network
+        community.docker.docker_network:
+          name: "{{ docker_network }}"
+          driver: bridge
+          state: present
+
+      - name: Create mcp-client-certs directory
+        ansible.builtin.file:
+          path: "{{ item.certs_path }}"
+          state: directory
+          mode: '0700'
+        loop: "{{ cycling_stack_apps | selectattr('certs_path', 'defined') | list }}"
+
+      - name: Seed the client cert for cycling-coach-mcp-server to access the coach application
+        ansible.builtin.copy:
+          dest: "{{ item.0.certs_path }}/{{ item.1.filename }}"
+          content: "{{ item.1.content }}"
+          force: false
+        loop: "{{ cycling_stack_apps | selectattr('cert_files', 'defined') | subelements('cert_files') }}"
+
+      - name: Run containers
+        community.docker.docker_container:
+          name: "{{ item.name }}"
+          hostname: "{{ item.hostname | default(omit) }}"
+          detach: true
+          image: "{{ item.image }}"
+          network_mode: "{{ docker_network }}"
+          env: "{{ item.env | default(omit) }}"
+          mounts: "{{ item.mounts | default(common_mounts) }}"
+          ports: "{{ item.ports | default(omit) }}"
+          volumes: "{{ item.volumes | default(omit) }}"
+          restart_policy: unless-stopped
+        loop: "{{ cycling_stack_apps }}"
