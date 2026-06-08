@@ -260,8 +260,10 @@ backup_definitions:
       - source_path: /data/refresh.json
         target_filename: refresh.json
     host_commands:
-      - tar -czf "{{ backup_destination }}/mcp-auth-backup.tar.gz" -C "{{ backup_destination }}" refresh.json
-      - rm -f "{{ backup_destination }}/refresh.json"
+      - >-
+        cd "{{ backups_directory }}/{{ backup_timestamp }}/cycling-stack"
+        && tar -czf mcp-auth-backup.tar.gz refresh.json
+        && rm -f refresh.json
 
   - application: cycling-stack
     container: healthbridge-backend
