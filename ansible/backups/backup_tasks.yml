@@ -5,7 +5,6 @@
     container: "{{ item.container }}"
     backup_commands: "{{ item.backup_commands }}"
     copy_actions: "{{ item.copy_actions }}"
-    host_commands: "{{ item.host_commands | default([]) }}"
     backup_destination: "{{ backups_directory }}/{{ backup_timestamp }}/{{ item.application }}"
 
 - name: Ensure {{ backup_destination }} directory exists
@@ -36,10 +35,10 @@
   ansible.builtin.shell: "{{ host_cmd }}"
   args:
     executable: /bin/bash
-  loop: "{{ host_commands }}"
+  loop: "{{ item.host_commands | default([]) }}"
   loop_control:
     loop_var: host_cmd
-  when: host_commands | length > 0
+  when: item.host_commands | default([]) | length > 0
 
 - name: Get size of the backup directory
   ansible.builtin.shell: du -sh "{{ backup_destination }}" | cut -f1
