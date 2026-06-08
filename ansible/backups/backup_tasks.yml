@@ -1,4 +1,13 @@
 
+- name: Set backup variables for {{ item.application }}
+  set_fact:
+    application_name: "{{ item.application }}"
+    container: "{{ item.container }}"
+    backup_commands: "{{ item.backup_commands }}"
+    copy_actions: "{{ item.copy_actions }}"
+    host_commands: "{{ item.host_commands | default([]) }}"
+    backup_destination: "{{ backups_directory }}/{{ backup_timestamp }}/{{ item.application }}"
+
 - name: Ensure {{ backup_destination }} directory exists
   file:
     path: "{{ backup_destination }}"

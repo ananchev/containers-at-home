@@ -34,13 +34,6 @@
       loop_control:
         label: "{{ item.application }}"
       when: inventory_hostname in application_hosts[item.application]
-      vars:
-        application_name: "{{ item.application }}"
-        container: "{{ item.container }}"
-        backup_commands: "{{ item.backup_commands }}"
-        copy_actions: "{{ item.copy_actions }}"
-        host_commands: "{{ item.host_commands | default([]) }}"
-        backup_destination: "{{ backups_directory }}/{{ backup_timestamp }}/{{ application_name }}"
     
     - name: Ensure no temporary private key to auth on the backups target host exists
       file:
