@@ -19,3 +19,6 @@ borg_repos:
   - name: immich
     source: "{{ large_backups_location }}immich"
     use_snapshot: false  # immich backup is on the array not ZFS, so no snapshot possible
+  - name: nextcloud
+    source: "{{ large_backups_location }}nextcloud"
+    use_snapshot: false  # nextcloud data rsync lands on the array not ZFS, so no snapshot possible

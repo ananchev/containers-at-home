@@ -28,5 +28,6 @@ application_hosts:
   caddy: bnod
   passbolt-recovery: bnod
   immich: vhost
+  nextcloud: vhost
   cycling-stack: unas
   arr-stack: unas

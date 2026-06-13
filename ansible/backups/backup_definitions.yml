@@ -222,6 +222,30 @@ backup_definitions:
         > /tmp/immich_rsync.log 2>&1
     copy_actions: []
 
+  - application: nextcloud
+    container: nextcloud-postgres
+    backup_commands:
+      - pg_dump --clean --if-exists --dbname=nextcloud --username=nextcloud -f /tmp/nextcloud_db.sql
+      - gzip -f /tmp/nextcloud_db.sql
+    copy_actions:
+      - source_path: /tmp/nextcloud_db.sql.gz
+        target_filename: nextcloud_db.sql.gz
+
+  - application: nextcloud
+    container: nextcloud-app
+    backup_commands:
+      - tar -czf /tmp/backup.tar.gz -C /var/www/html config custom_apps
+    copy_actions:
+      - source_path: /tmp/backup.tar.gz
+        target_filename: backup.tar.gz
+    host_commands:
+      - >-
+        rsync -av --delete
+        -e "ssh -i /home/{{ ansible_user }}/.ssh/nextcloud_backup_key -o StrictHostKeyChecking=no"
+        {{ docker_data_root }}/nextcloud/data/
+        {{ backup_user }}@{{ large_backups_host }}:{{ large_backups_location }}/nextcloud
+        > /tmp/nextcloud_rsync.log 2>&1
+
   - application: caddy
     container: caddy
     backup_commands:
