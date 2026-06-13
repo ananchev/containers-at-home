@@ -38,7 +38,16 @@
     nextcloud_http_port: 8080
     nextcloud_hostname: cloud.tonio.cc
     nextcloud_lan_ip: 192.168.2.3
-    nextcloud_trusted_proxies: "192.168.2.8"   # nginx-proxy-manager on fed
+    # Trusted proxies: fed (NPM) + Cloudflare published ranges, so brute-force /
+    # rate-limit protection records the real visitor IP, not the CF/NPM hop.
+    nextcloud_trusted_proxies: >-
+      192.168.2.8
+      173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22
+      141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20
+      197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13
+      104.24.0.0/14 172.64.0.0/13 131.0.72.0/22
+      2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32
+      2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
     nextcloud_admin_user: ananchev
     nextcloud_db_name: nextcloud
     nextcloud_db_user: nextcloud
@@ -46,6 +55,17 @@
     # www-data uid/gid inside the official nextcloud image.
     nextcloud_uid: "33"
     nextcloud_gid: "33"
+
+    # Elasticsearch full-text search (single node, security disabled — it only
+    # listens on the isolated nextcloud-net, never exposed). Nextcloud's
+    # fulltextsearch_elasticsearch app uses the official elastic client whose
+    # product-check rejects OpenSearch, so this must be real Elasticsearch. Image
+    # is built below from the app_versions base with ingest-attachment baked in so
+    # document *contents* (PDF/Office) are extracted and searchable.
+    elasticsearch_image: nextcloud-elasticsearch:local
+    elasticsearch_uid: "1000"
+    elasticsearch_heap: 2g        # ~50% of the container limit (ES best practice)
+    elasticsearch_mem_limit: 4g   # heap + Lucene/Tika off-heap; sized for a ~100GB corpus
 
     nextcloud_images:
       app: "{{ app_versions.nextcloud_app.image }}"
@@ -112,6 +132,67 @@
             name: "{{ docker_network }}"
             driver: bridge
             state: present
+
+        - name: Ensure vm.max_map_count for Elasticsearch (persistent)
+          ansible.builtin.copy:
+            dest: /etc/sysctl.d/99-elasticsearch.conf
+            content: "vm.max_map_count=262144\n"
+            mode: '0644'
+
+        - name: Apply vm.max_map_count now
+          ansible.builtin.command: sysctl -w vm.max_map_count=262144
+          changed_when: false
+
+        - name: Create Elasticsearch data directory
+          ansible.builtin.file:
+            path: "{{ host_directory }}/elasticsearch"
+            state: directory
+            owner: "{{ elasticsearch_uid }}"
+            group: "{{ elasticsearch_uid }}"
+            mode: '0755'
+
+        - name: Create Elasticsearch image build directory
+          ansible.builtin.file:
+            path: /tmp/nextcloud-elasticsearch-build
+            state: directory
+            mode: '0700'
+
+        - name: Write Elasticsearch Dockerfile (bake in ingest-attachment)
+          ansible.builtin.copy:
+            dest: /tmp/nextcloud-elasticsearch-build/Dockerfile
+            content: |
+              FROM {{ app_versions.nextcloud_elasticsearch.image }}
+              RUN /usr/share/elasticsearch/bin/elasticsearch-plugin install --batch ingest-attachment
+
+        - name: Build the Elasticsearch image
+          community.docker.docker_image:
+            name: nextcloud-elasticsearch
+            tag: local
+            source: build
+            build:
+              path: /tmp/nextcloud-elasticsearch-build
+            force_source: true
+            state: present
+
+        - name: Run Elasticsearch container
+          community.docker.docker_container:
+            name: "{{ application }}-elasticsearch"
+            hostname: "{{ application }}-elasticsearch"
+            image: "{{ elasticsearch_image }}"
+            network_mode: "{{ docker_network }}"
+            detach: true
+            restart_policy: unless-stopped
+            memory: "{{ elasticsearch_mem_limit }}"
+            ulimits:
+              - "memlock:-1:-1"
+              - "nofile:65536:65536"
+            env:
+              "discovery.type": single-node
+              "xpack.security.enabled": "false"
+              "bootstrap.memory_lock": "true"
+              ES_JAVA_OPTS: "-Xms{{ elasticsearch_heap }} -Xmx{{ elasticsearch_heap }}"
+            volumes:
+              - "{{ host_directory }}/elasticsearch:/usr/share/elasticsearch/data:Z"
 
         - name: Run Redis container (file locking + distributed cache)
           community.docker.docker_container:
@@ -249,6 +330,49 @@
           ansible.builtin.command: >
             docker exec -u www-data {{ application }}-app
             php occ config:system:set maintenance_window_start --type=integer --value=1
+          changed_when: false
+
+        # ----------------------------------------------------------------------
+        # Full-text search wiring (fulltextsearch + Elasticsearch / ingest-attachment).
+        # The initial full index is a deliberate manual step (heavy/long):
+        #   docker exec -u www-data nextcloud-app php occ fulltextsearch:index
+        # Thereafter the background cron keeps the index current.
+        # ----------------------------------------------------------------------
+        - name: Wait for Elasticsearch to accept connections on 9200
+          ansible.builtin.command: >
+            docker exec {{ application }}-elasticsearch
+            bash -c "echo > /dev/tcp/localhost/9200"
+          register: es_ready
+          until: es_ready.rc == 0
+          retries: 48
+          delay: 5
+          changed_when: false
+
+        - name: Install/enable full-text search apps
+          ansible.builtin.shell: >
+            docker exec -u www-data {{ application }}-app php occ app:install {{ item }}
+            || docker exec -u www-data {{ application }}-app php occ app:enable {{ item }}
+          loop:
+            - fulltextsearch
+            - fulltextsearch_elasticsearch
+            - files_fulltextsearch
+          changed_when: false
+
+        - name: Configure the full-text search platform
+          ansible.builtin.shell: "docker exec -u www-data {{ application }}-app php occ {{ item }}"
+          loop:
+            - "config:app:set fulltextsearch search_platform --value 'OCA\\FullTextSearch_Elasticsearch\\Platform\\ElasticSearchPlatform'"
+            - "config:app:set fulltextsearch_elasticsearch elastic_host --value 'http://{{ application }}-elasticsearch:9200'"
+            - "config:app:set fulltextsearch_elasticsearch elastic_index --value 'nextcloud'"
+          changed_when: false
+
+        - name: Validate the search platform connection (retry until ES is ready)
+          ansible.builtin.command: >
+            docker exec -u www-data {{ application }}-app php occ fulltextsearch:test
+          register: fts_test
+          until: fts_test.rc == 0
+          retries: 12
+          delay: 5
           changed_when: false
 
         # ----------------------------------------------------------------------

@@ -22,9 +22,10 @@ content indexing stays fully local and fast. This mirrors the immich model on th
 ## Reverse proxy (nginx-proxy-manager on fed)
 
 * Proxy host: `cloud.tonio.cc` → `http://192.168.2.3:8080`, **Websockets on**, **Block Common Exploits off** (NC has its own headers), request body size raised (`client_max_body_size 16G` in the Advanced tab to match `PHP_UPLOAD_LIMIT`).
-* The container is told it sits behind a proxy via `TRUSTED_PROXIES=192.168.2.8`,
-  `OVERWRITEPROTOCOL=https`, `OVERWRITEHOST`/`OVERWRITECLIURL=https://cloud.tonio.cc`,
-  `APACHE_DISABLE_REWRITE_IP=1`.
+* The container is told it sits behind a proxy via `TRUSTED_PROXIES` (fed/NPM
+  `192.168.2.8` **+ Cloudflare's published ranges**, so brute-force / rate-limit
+  protection records the real visitor IP, not the CF/NPM hop), `OVERWRITEPROTOCOL=https`,
+  `OVERWRITEHOST`/`OVERWRITECLIURL=https://cloud.tonio.cc`, `APACHE_DISABLE_REWRITE_IP=1`.
 * After first start, verify `occ config:list system` shows the `overwrite*` keys and
   that the **Security & setup warnings** admin page is clean (esp. the reverse-proxy
   and `.well-known/{caldav,carddav}` checks — add the well-known redirects in NPM's
@@ -46,11 +47,27 @@ Reused from the existing vault: `backup_private_key`, `backup_user`.
 ## Image versions & DIUN watching
 
 `nextcloud.yml` reads its images from the vaulted `app_versions.yml` keys
-`nextcloud_app`, `nextcloud_db`, `nextcloud_redis` — so those entries are the single
-source of truth for both the deployed tags and DIUN's watchlist. Each entry pins the
-`image:` tag and carries a `diun_include_pattern` (and optional `diun_watch: false`)
-in the usual `app_versions.yml` style; there are no versions hardcoded here or in the
-playbook to keep in sync.
+`nextcloud_app`, `nextcloud_db`, `nextcloud_redis`, and `nextcloud_elasticsearch` — so
+those entries are the single source of truth for both the deployed tags and DIUN's
+watchlist. Each entry pins the `image:` tag and carries a `diun_include_pattern` (and
+optional `diun_watch: false`) in the usual `app_versions.yml` style; there are no
+versions hardcoded here or in the playbook to keep in sync.
+
+> **Pin `nextcloud_app` to a major the FTS apps support.** `fulltextsearch` &co. lag
+> the newest Nextcloud — they support up to **33**, not 34. Check the app store
+> (`apps.nextcloud.com/api/v1/platform/<ver>/apps.json`) before bumping a major.
+
+`nextcloud_elasticsearch` is the **base** image for the locally-built
+`nextcloud-elasticsearch:local` (the playbook bakes in `ingest-attachment`). It must be
+real **Elasticsearch**, not OpenSearch — the `fulltextsearch_elasticsearch` app's
+elastic client does a product-check that rejects OpenSearch. E.g.:
+
+```yaml
+  nextcloud_elasticsearch:
+    image: "docker.elastic.co/elasticsearch/elasticsearch:8.15.3"
+    diun_include_pattern: '^\d+\.\d+\.\d+$'
+    diun_watch: false   # bumped together with the nextcloud stack
+```
 
 > Upgrade Nextcloud **one major at a time** (never skip a major) by bumping the
 > `nextcloud_app` tag in `app_versions.yml` and re-running the playbook. The image
@@ -105,13 +122,27 @@ re-sync) and `occ files:scan --all` if the data dir was touched out-of-band.
 Planned as a follow-up phase (the design keeps it first-class because everything is
 local NVMe):
 
-1. **Full-text search** — add an `opensearch` container to `nextcloud-net`, then
-   install `fulltextsearch` + `fulltextsearch_elasticsearch` + `files_fulltextsearch`;
-   index with `occ fulltextsearch:index`. Because the data dir is primary storage
-   (not external), live update hooks keep the index current automatically.
-2. **Recognize** — AI tagging / object & face recognition for photos and documents
-   (TensorFlow; heavy first run, then incremental).
-3. **Context Chat / Assistant** — semantic search + LLM Q&A over documents; the
-   natural bridge to an **MCP** layer (cf. the cycling-stack / healthbridge MCP
-   servers already on the estate) for "search my Nextcloud" tools.
+1. **Full-text search — DONE.** `nextcloud-elasticsearch` (single node, security
+   disabled, internal-only) runs on `nextcloud-net`, built from `nextcloud_elasticsearch`
+   with the `ingest-attachment` plugin so document *contents* are indexed. (Must be
+   Elasticsearch, not OpenSearch — the app's elastic client product-check rejects
+   OpenSearch.) The playbook sets `vm.max_map_count`, caps the JVM heap
+   (`elasticsearch_heap`, 2g ≈ 50% of the limit) and the container memory
+   (`elasticsearch_mem_limit`, 4g), installs `fulltextsearch` +
+   `fulltextsearch_elasticsearch` + `files_fulltextsearch`, points the platform at
+   `http://nextcloud-elasticsearch:9200`, and validates with `occ fulltextsearch:test`.
+   * **Run the initial full index once** (heavy/long, so kept manual):
+     ```bash
+     ssh vhost 'docker exec -u www-data nextcloud-app php occ fulltextsearch:index'
+     ```
+     Because the data dir is primary storage (not external), the background cron keeps
+     the index current automatically afterwards.
+   * The index is **derived/rebuildable** — not backed up. After a restore, just re-run
+     `fulltextsearch:index`. If large PDFs OOM the Tika parser at 512m, raise
+     `elasticsearch_heap` / `elasticsearch_mem_limit`.
+2. **Recognize** — *excluded by design*: it's local-only ML and photos live in immich,
+   not Nextcloud.
+3. **Context Chat / MCP** — the AI stays external (Claude API); only a lightweight **MCP
+   server** would run locally to expose "search my Nextcloud" tooling, in the style of
+   the cycling-stack / healthbridge MCP servers already on the estate.
 
