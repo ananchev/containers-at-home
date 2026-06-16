@@ -18,12 +18,22 @@
 #   https://cloud.tonio.cc  ->  http://192.168.2.3:{{ nextcloud_http_port }}
 #
 # Vault variables required (add to group_vars/all/vault.yml):
-#   nextcloud_admin_password, nextcloud_db_password, nextcloud_redis_password
+#   nextcloud_admin_password, nextcloud_db_password, nextcloud_redis_password,
+#   nextcloud_mcp_app_password, nextcloud_onlyoffice_jwt_secret.
 # Reused from the existing vault: backup_private_key, backup_user.
 #
 # Image versions are pinned inline because app_versions.yml is vault-encrypted.
 # To have DIUN watch them, mirror the snippet from notes/nextcloud.md into the
 # vaulted app_versions.yml.
+#
+# STRUCTURE: the tasks are split into tagged include files under
+# tasks/nextcloud/, imported below in dependency order. Each import carries a tag
+# so a single concern can be (re)deployed on its own, e.g.:
+#   ./run-playbook.sh vhost nextcloud … --tags onlyoffice
+#   ./run-playbook.sh vhost nextcloud … --tags mcp
+# A full run (no --tags) executes them all, exactly as before. Scoped runs assume
+# the shared bits an earlier phase created (network, app container) already exist
+# — true after any prior full deploy; a first-ever deploy must run the whole play.
 
 - hosts: homelab
   become: true
@@ -71,319 +81,80 @@
       app: "{{ app_versions.nextcloud_app.image }}"
       postgres: "{{ app_versions.nextcloud_db.image }}"
       redis: "{{ app_versions.nextcloud_redis.image }}"
+      mcp: "{{ app_versions.nextcloud_mcp.image }}"   # stock cbcoutinho/nextcloud-mcp-server
+      onlyoffice: "{{ app_versions.nextcloud_onlyoffice.image }}"   # onlyoffice/documentserver
+
+    # --- MCP access for claude.ai (web) --------------------------------------
+    # Two extra containers on nextcloud-net let claude.ai reach Nextcloud data:
+    #   * nextcloud-mcp       — the STOCK upstream MCP server (single-user, Basic
+    #     Auth) running as a dedicated, NON-admin `mcp` Nextcloud user. Internal
+    #     only (no published port). See notes/nextcloud.md for the user / read-only
+    #     shares / `/AI` sandbox setup assumptions that bound its blast radius.
+    #   * nextcloud-mcp-shim  — github.com/ananchev/nextcloud-mcp-shim, the OAuth
+    #     Resource Server that gates the upstream: serves RFC 9728 discovery,
+    #     validates the HS256 tokens minted by the shared `mcp-auth` AS (on unas,
+    #     reached at its public URL), then proxies /mcp. The ONLY one exposed,
+    #     via NPM (fed) -> ncmcp.tonio.cc. Reuses mcp-auth unchanged (its tokens
+    #     are audience-less HS256 — same signing key + issuer is all the shim needs).
+    nextcloud_mcp_user: mcp
+    nextcloud_mcp_public_url: https://ncmcp.tonio.cc
+    nextcloud_mcp_shim_port: 8093
+    nextcloud_mcp_shim_repo: https://github.com/ananchev/nextcloud-mcp-shim.git
+    nextcloud_mcp_shim_source: "{{ host_directory }}/mcp-shim/source"
+    # INTERIM fork build: the upstream MCP server has no file content-search tool,
+    # so we run our fork's full-text-search branch (adds nc_files_full_text_search;
+    # PR pending upstream at cbcoutinho/nextcloud-mcp-server). app_versions.nextcloud_mcp.image
+    # (vault) is pinned to `nextcloud_mcp_fork_image` below. To revert to stock: drop
+    # the two fork tasks and point that vault var back at an official ghcr.io tag.
+    nextcloud_mcp_fork_repo: https://github.com/ananchev/nextcloud-mcp-server.git
+    nextcloud_mcp_fork_version: feat/full-text-search
+    nextcloud_mcp_fork_source: "{{ host_directory }}/mcp-fork/source"
+    nextcloud_mcp_fork_image: nextcloud-mcp-server:fts-local
+
+    # --- OnlyOffice in-place Office editing -----------------------------------
+    # The OnlyOffice Document Server renders/edits docx/xlsx/pptx in the browser.
+    # Because the editor runs CLIENT-SIDE, the Document Server is the one Nextcloud
+    # component that must be browser-reachable -> exposed via NPM at
+    # {{ onlyoffice_public_url }} (the single new public hostname). All heavy
+    # traffic stays off Cloudflare though:
+    #   * browser -> DS   : {{ onlyoffice_public_url }} (editor JS + websocket edits only)
+    #   * NC      -> DS   : http://{{ application }}-onlyoffice/  (docker nextcloud-net)
+    #   * DS      -> NC   : http://{{ nextcloud_lan_ip }}:{{ nextcloud_http_port }}/  (host LAN IP,
+    #                       already a trusted domain — so file download/save never
+    #                       crosses CF and needs no NEXTCLOUD_TRUSTED_DOMAINS change)
+    # Security boundary: a shared JWT secret signs every NC<->DS request. It is a
+    # vault var (nextcloud_onlyoffice_jwt_secret) since the playbook can't edit the
+    # encrypted vault. Generate once with: openssl rand -hex 32
+    onlyoffice_public_url: https://office.tonio.cc
+    onlyoffice_http_port: 8082
 
   tasks:
     - name: Run only on the designated host
       when: inventory_hostname in application_hosts[application]
       block:
-        - name: Create directories on the local NVMe
-          file:
-            path: "{{ item }}"
-            state: directory
-            mode: '0755'
-          loop:
-            - "{{ host_directory }}"
-            - "{{ host_directory }}/html"        # /var/www/html: app code, config, custom_apps, themes
-            - "{{ host_directory }}/postgres"
-            - "{{ host_directory }}/redis"
+        # Dependency order: filesystem/restore prep -> datastores (incl. DB
+        # restore) -> app + post-install -> full-text search -> OnlyOffice -> MCP.
+        # Each import is tagged so it can be (re)run in isolation; see header.
+        - name: Filesystem prep + restore staging
+          ansible.builtin.import_tasks: tasks/nextcloud/prep.yml
+          tags: [prep, restore]
 
-        - name: Ensure the data directory exists and is owned by www-data
-          file:
-            path: "{{ data_directory }}"
-            state: directory
-            owner: "{{ nextcloud_uid }}"
-            group: "{{ nextcloud_gid }}"
-            mode: '0770'
+        - name: Datastores (network, Elasticsearch, Redis, Postgres, DB restore)
+          ansible.builtin.import_tasks: tasks/nextcloud/datastores.yml
+          tags: [datastores]
 
-        # ----------------------------------------------------------------------
-        # Restore detection (mirrors immich.yml). On a fresh install no backup
-        # exists; on a rebuild the DB dump + app-config tar are restored and the
-        # installer is skipped because config.php already declares 'installed'.
-        # The data dir itself is restored separately by rsyncing it back from
-        # the NAS array -- see notes/nextcloud.md.
-        # ----------------------------------------------------------------------
-        - name: Check if a database backup exists locally
-          set_fact:
-            nextcloud_db_backup_exists: "{{ (local_backup_folder + '/nextcloud_db.sql.gz') is file }}"
+        - name: Nextcloud app + cron + post-install tuning
+          ansible.builtin.import_tasks: tasks/nextcloud/app.yml
+          tags: [app]
 
-        - name: Check if an app-config backup exists locally
-          set_fact:
-            nextcloud_config_backup_exists: "{{ (local_backup_folder + '/backup.tar.gz') is file }}"
+        - name: Full-text search (Elasticsearch wiring)
+          ansible.builtin.import_tasks: tasks/nextcloud/fulltextsearch.yml
+          tags: [fts]
 
-        - name: Copy the database backup to the remote machine
-          ansible.builtin.copy:
-            src: "{{ local_backup_folder }}/nextcloud_db.sql.gz"
-            dest: /tmp/nextcloud_db.sql.gz
-          when: nextcloud_db_backup_exists
+        - name: OnlyOffice in-place editing (Document Server + connector)
+          ansible.builtin.import_tasks: tasks/nextcloud/onlyoffice.yml
+          tags: [onlyoffice]
 
-        - name: Copy the app-config backup to the remote machine
-          ansible.builtin.copy:
-            src: "{{ local_backup_folder }}/backup.tar.gz"
-            dest: /tmp/nextcloud_config.tar.gz
-          when: nextcloud_config_backup_exists
-
-        - name: Restore app config / custom_apps into the html volume
-          ansible.builtin.command: >
-            tar -xzf /tmp/nextcloud_config.tar.gz -C {{ host_directory }}/html
-          when: nextcloud_config_backup_exists
-
-        - name: Create docker network for Nextcloud containers
-          community.docker.docker_network:
-            name: "{{ docker_network }}"
-            driver: bridge
-            state: present
-
-        - name: Ensure vm.max_map_count for Elasticsearch (persistent)
-          ansible.builtin.copy:
-            dest: /etc/sysctl.d/99-elasticsearch.conf
-            content: "vm.max_map_count=262144\n"
-            mode: '0644'
-
-        - name: Apply vm.max_map_count now
-          ansible.builtin.command: sysctl -w vm.max_map_count=262144
-          changed_when: false
-
-        - name: Create Elasticsearch data directory
-          ansible.builtin.file:
-            path: "{{ host_directory }}/elasticsearch"
-            state: directory
-            owner: "{{ elasticsearch_uid }}"
-            group: "{{ elasticsearch_uid }}"
-            mode: '0755'
-
-        - name: Create Elasticsearch image build directory
-          ansible.builtin.file:
-            path: /tmp/nextcloud-elasticsearch-build
-            state: directory
-            mode: '0700'
-
-        - name: Write Elasticsearch Dockerfile (bake in ingest-attachment)
-          ansible.builtin.copy:
-            dest: /tmp/nextcloud-elasticsearch-build/Dockerfile
-            content: |
-              FROM {{ app_versions.nextcloud_elasticsearch.image }}
-              RUN /usr/share/elasticsearch/bin/elasticsearch-plugin install --batch ingest-attachment
-
-        - name: Build the Elasticsearch image
-          community.docker.docker_image:
-            name: nextcloud-elasticsearch
-            tag: local
-            source: build
-            build:
-              path: /tmp/nextcloud-elasticsearch-build
-            force_source: true
-            state: present
-
-        - name: Run Elasticsearch container
-          community.docker.docker_container:
-            name: "{{ application }}-elasticsearch"
-            hostname: "{{ application }}-elasticsearch"
-            image: "{{ elasticsearch_image }}"
-            network_mode: "{{ docker_network }}"
-            detach: true
-            restart_policy: unless-stopped
-            memory: "{{ elasticsearch_mem_limit }}"
-            ulimits:
-              - "memlock:-1:-1"
-              - "nofile:65536:65536"
-            env:
-              "discovery.type": single-node
-              "xpack.security.enabled": "false"
-              "bootstrap.memory_lock": "true"
-              ES_JAVA_OPTS: "-Xms{{ elasticsearch_heap }} -Xmx{{ elasticsearch_heap }}"
-            volumes:
-              - "{{ host_directory }}/elasticsearch:/usr/share/elasticsearch/data:Z"
-
-        - name: Run Redis container (file locking + distributed cache)
-          community.docker.docker_container:
-            name: "{{ application }}-redis"
-            hostname: "{{ application }}-redis"
-            image: "{{ nextcloud_images.redis }}"
-            command: ["redis-server", "--requirepass", "{{ nextcloud_redis_password }}"]
-            network_mode: "{{ docker_network }}"
-            detach: true
-            restart_policy: unless-stopped
-            volumes:
-              - "{{ host_directory }}/redis:/data:Z"
-
-        - name: Run Postgres container
-          community.docker.docker_container:
-            name: "{{ application }}-postgres"
-            hostname: "{{ application }}-postgres"
-            image: "{{ nextcloud_images.postgres }}"
-            network_mode: "{{ docker_network }}"
-            detach: true
-            restart_policy: unless-stopped
-            env:
-              POSTGRES_DB: "{{ nextcloud_db_name }}"
-              POSTGRES_USER: "{{ nextcloud_db_user }}"
-              POSTGRES_PASSWORD: "{{ nextcloud_db_password }}"
-            volumes:
-              - "{{ host_directory }}/postgres:/var/lib/postgresql/data:Z"
-
-        - name: Wait for Postgres to be ready
-          ansible.builtin.command: >
-            docker exec {{ application }}-postgres
-            pg_isready -U {{ nextcloud_db_user }} -d {{ nextcloud_db_name }}
-          register: pg_ready
-          until: pg_ready.rc == 0
-          retries: 30
-          delay: 2
-          changed_when: false
-
-        - name: Restore database from backup
-          when: nextcloud_db_backup_exists
-          ansible.builtin.shell: |
-            gunzip --stdout /tmp/nextcloud_db.sql.gz \
-            | docker exec -i {{ application }}-postgres \
-                psql --dbname={{ nextcloud_db_name }} --username={{ nextcloud_db_user }} \
-                --single-transaction --set ON_ERROR_STOP=on
-          args:
-            executable: /bin/bash
-
-        - name: Run Nextcloud app container
-          community.docker.docker_container:
-            name: "{{ application }}-app"
-            hostname: "{{ application }}-app"
-            image: "{{ nextcloud_images.app }}"
-            network_mode: "{{ docker_network }}"
-            detach: true
-            restart_policy: unless-stopped
-            ports:
-              - "{{ nextcloud_http_port }}:80"
-            volumes:
-              - "{{ host_directory }}/html:/var/www/html:z"     # shared with the cron container -> :z
-              - "{{ data_directory }}:/var/www/html/data:z"
-            mounts:
-              - source: /etc/localtime
-                target: /etc/localtime
-                type: bind
-                read_only: yes
-            env:
-              POSTGRES_HOST: "{{ application }}-postgres"
-              POSTGRES_DB: "{{ nextcloud_db_name }}"
-              POSTGRES_USER: "{{ nextcloud_db_user }}"
-              POSTGRES_PASSWORD: "{{ nextcloud_db_password }}"
-              REDIS_HOST: "{{ application }}-redis"
-              REDIS_HOST_PASSWORD: "{{ nextcloud_redis_password }}"
-              NEXTCLOUD_ADMIN_USER: "{{ nextcloud_admin_user }}"
-              NEXTCLOUD_ADMIN_PASSWORD: "{{ nextcloud_admin_password }}"
-              NEXTCLOUD_TRUSTED_DOMAINS: "{{ nextcloud_hostname }} {{ nextcloud_lan_ip }}"
-              NEXTCLOUD_DATA_DIR: /var/www/html/data
-              TRUSTED_PROXIES: "{{ nextcloud_trusted_proxies }}"
-              OVERWRITEPROTOCOL: https
-              OVERWRITEHOST: "{{ nextcloud_hostname }}"
-              OVERWRITECLIURL: "https://{{ nextcloud_hostname }}"
-              APACHE_DISABLE_REWRITE_IP: "1"
-              PHP_MEMORY_LIMIT: 1024M
-              PHP_UPLOAD_LIMIT: 16G
-              TZ: "Europe/Amsterdam"
-
-        - name: Run Nextcloud cron container (background jobs)
-          community.docker.docker_container:
-            name: "{{ application }}-cron"
-            hostname: "{{ application }}-cron"
-            image: "{{ nextcloud_images.app }}"
-            entrypoint: ["/cron.sh"]
-            network_mode: "{{ docker_network }}"
-            detach: true
-            restart_policy: unless-stopped
-            volumes:
-              - "{{ host_directory }}/html:/var/www/html:z"
-              - "{{ data_directory }}:/var/www/html/data:z"
-            mounts:
-              - source: /etc/localtime
-                target: /etc/localtime
-                type: bind
-                read_only: yes
-
-        - name: Wait for Nextcloud to finish first-run install / upgrade
-          ansible.builtin.shell: >
-            docker exec -u www-data {{ application }}-app
-            php occ status --output=json
-          register: nc_status
-          until: nc_status.rc == 0 and (nc_status.stdout | from_json).installed | default(false)
-          retries: 60
-          delay: 5
-          changed_when: false
-
-        # ----------------------------------------------------------------------
-        # Post-install recommended settings (idempotent).
-        # ----------------------------------------------------------------------
-        - name: Use system cron for background jobs
-          ansible.builtin.command: >
-            docker exec -u www-data {{ application }}-app php occ background:cron
-          changed_when: false
-
-        - name: Add missing database indices
-          ansible.builtin.command: >
-            docker exec -u www-data {{ application }}-app php occ db:add-missing-indices
-          changed_when: false
-
-        - name: Set default phone region
-          ansible.builtin.command: >
-            docker exec -u www-data {{ application }}-app
-            php occ config:system:set default_phone_region --value=NL
-          changed_when: false
-
-        - name: Set maintenance window start (UTC hour, low-traffic)
-          ansible.builtin.command: >
-            docker exec -u www-data {{ application }}-app
-            php occ config:system:set maintenance_window_start --type=integer --value=1
-          changed_when: false
-
-        # ----------------------------------------------------------------------
-        # Full-text search wiring (fulltextsearch + Elasticsearch / ingest-attachment).
-        # The initial full index is a deliberate manual step (heavy/long):
-        #   docker exec -u www-data nextcloud-app php occ fulltextsearch:index
-        # Thereafter the background cron keeps the index current.
-        # ----------------------------------------------------------------------
-        - name: Wait for Elasticsearch to accept connections on 9200
-          ansible.builtin.command: >
-            docker exec {{ application }}-elasticsearch
-            bash -c "echo > /dev/tcp/localhost/9200"
-          register: es_ready
-          until: es_ready.rc == 0
-          retries: 48
-          delay: 5
-          changed_when: false
-
-        - name: Install/enable full-text search apps
-          ansible.builtin.shell: >
-            docker exec -u www-data {{ application }}-app php occ app:install {{ item }}
-            || docker exec -u www-data {{ application }}-app php occ app:enable {{ item }}
-          loop:
-            - fulltextsearch
-            - fulltextsearch_elasticsearch
-            - files_fulltextsearch
-          changed_when: false
-
-        - name: Configure the full-text search platform
-          ansible.builtin.shell: "docker exec -u www-data {{ application }}-app php occ {{ item }}"
-          loop:
-            - "config:app:set fulltextsearch search_platform --value 'OCA\\FullTextSearch_Elasticsearch\\Platform\\ElasticSearchPlatform'"
-            - "config:app:set fulltextsearch_elasticsearch elastic_host --value 'http://{{ application }}-elasticsearch:9200'"
-            - "config:app:set fulltextsearch_elasticsearch elastic_index --value 'nextcloud'"
-          changed_when: false
-
-        - name: Validate the search platform connection (retry until ES is ready)
-          ansible.builtin.command: >
-            docker exec -u www-data {{ application }}-app php occ fulltextsearch:test
-          register: fts_test
-          until: fts_test.rc == 0
-          retries: 12
-          delay: 5
-          changed_when: false
-
-        # ----------------------------------------------------------------------
-        # Backup SSH key for the data-dir rsync to the NAS (see
-        # backup_definitions.yml -> nextcloud-app host_commands).
-        # ----------------------------------------------------------------------
-        - name: Deploy backup SSH private key
-          copy:
-            content: "{{ backup_private_key }}"
-            dest: /home/{{ ansible_user }}/.ssh/nextcloud_backup_key
-            mode: '0600'
-            setype: ssh_home_t
-          become: true
-          become_user: "{{ ansible_user }}"
+        - name: MCP access for claude.ai (server + auth shim)
+          ansible.builtin.import_tasks: tasks/nextcloud/mcp.yml
+          tags: [mcp]

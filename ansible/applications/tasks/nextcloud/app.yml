@@ -1,0 +1,106 @@
+---
+# The Nextcloud app + cron containers, the first-run install/upgrade wait, the
+# idempotent post-install tuning, and the backup SSH key for the data-dir rsync.
+- name: Run Nextcloud app container
+  community.docker.docker_container:
+    name: "{{ application }}-app"
+    hostname: "{{ application }}-app"
+    image: "{{ nextcloud_images.app }}"
+    network_mode: "{{ docker_network }}"
+    detach: true
+    restart_policy: unless-stopped
+    ports:
+      - "{{ nextcloud_http_port }}:80"
+    volumes:
+      - "{{ host_directory }}/html:/var/www/html:z"     # shared with the cron container -> :z
+      - "{{ data_directory }}:/var/www/html/data:z"
+    mounts:
+      - source: /etc/localtime
+        target: /etc/localtime
+        type: bind
+        read_only: yes
+    env:
+      POSTGRES_HOST: "{{ application }}-postgres"
+      POSTGRES_DB: "{{ nextcloud_db_name }}"
+      POSTGRES_USER: "{{ nextcloud_db_user }}"
+      POSTGRES_PASSWORD: "{{ nextcloud_db_password }}"
+      REDIS_HOST: "{{ application }}-redis"
+      REDIS_HOST_PASSWORD: "{{ nextcloud_redis_password }}"
+      NEXTCLOUD_ADMIN_USER: "{{ nextcloud_admin_user }}"
+      NEXTCLOUD_ADMIN_PASSWORD: "{{ nextcloud_admin_password }}"
+      NEXTCLOUD_TRUSTED_DOMAINS: "{{ nextcloud_hostname }} {{ nextcloud_lan_ip }}"
+      NEXTCLOUD_DATA_DIR: /var/www/html/data
+      TRUSTED_PROXIES: "{{ nextcloud_trusted_proxies }}"
+      OVERWRITEPROTOCOL: https
+      OVERWRITEHOST: "{{ nextcloud_hostname }}"
+      OVERWRITECLIURL: "https://{{ nextcloud_hostname }}"
+      APACHE_DISABLE_REWRITE_IP: "1"
+      PHP_MEMORY_LIMIT: 1024M
+      PHP_UPLOAD_LIMIT: 16G
+      TZ: "Europe/Amsterdam"
+
+- name: Run Nextcloud cron container (background jobs)
+  community.docker.docker_container:
+    name: "{{ application }}-cron"
+    hostname: "{{ application }}-cron"
+    image: "{{ nextcloud_images.app }}"
+    entrypoint: ["/cron.sh"]
+    network_mode: "{{ docker_network }}"
+    detach: true
+    restart_policy: unless-stopped
+    volumes:
+      - "{{ host_directory }}/html:/var/www/html:z"
+      - "{{ data_directory }}:/var/www/html/data:z"
+    mounts:
+      - source: /etc/localtime
+        target: /etc/localtime
+        type: bind
+        read_only: yes
+
+- name: Wait for Nextcloud to finish first-run install / upgrade
+  ansible.builtin.shell: >
+    docker exec -u www-data {{ application }}-app
+    php occ status --output=json
+  register: nc_status
+  until: nc_status.rc == 0 and (nc_status.stdout | from_json).installed | default(false)
+  retries: 60
+  delay: 5
+  changed_when: false
+
+# ----------------------------------------------------------------------
+# Post-install recommended settings (idempotent).
+# ----------------------------------------------------------------------
+- name: Use system cron for background jobs
+  ansible.builtin.command: >
+    docker exec -u www-data {{ application }}-app php occ background:cron
+  changed_when: false
+
+- name: Add missing database indices
+  ansible.builtin.command: >
+    docker exec -u www-data {{ application }}-app php occ db:add-missing-indices
+  changed_when: false
+
+- name: Set default phone region
+  ansible.builtin.command: >
+    docker exec -u www-data {{ application }}-app
+    php occ config:system:set default_phone_region --value=NL
+  changed_when: false
+
+- name: Set maintenance window start (UTC hour, low-traffic)
+  ansible.builtin.command: >
+    docker exec -u www-data {{ application }}-app
+    php occ config:system:set maintenance_window_start --type=integer --value=1
+  changed_when: false
+
+# ----------------------------------------------------------------------
+# Backup SSH key for the data-dir rsync to the NAS (see
+# backup_definitions.yml -> nextcloud-app host_commands).
+# ----------------------------------------------------------------------
+- name: Deploy backup SSH private key
+  copy:
+    content: "{{ backup_private_key }}"
+    dest: /home/{{ ansible_user }}/.ssh/nextcloud_backup_key
+    mode: '0600'
+    setype: ssh_home_t
+  become: true
+  become_user: "{{ ansible_user }}"

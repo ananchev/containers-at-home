@@ -1,0 +1,41 @@
+---
+# Full-text search wiring (fulltextsearch + Elasticsearch / ingest-attachment).
+# The initial full index is a deliberate manual step (heavy/long):
+#   docker exec -u www-data nextcloud-app php occ fulltextsearch:index
+# Thereafter the background cron keeps the index current.
+- name: Wait for Elasticsearch to accept connections on 9200
+  ansible.builtin.command: >
+    docker exec {{ application }}-elasticsearch
+    bash -c "echo > /dev/tcp/localhost/9200"
+  register: es_ready
+  until: es_ready.rc == 0
+  retries: 48
+  delay: 5
+  changed_when: false
+
+- name: Install/enable full-text search apps
+  ansible.builtin.shell: >
+    docker exec -u www-data {{ application }}-app php occ app:install {{ item }}
+    || docker exec -u www-data {{ application }}-app php occ app:enable {{ item }}
+  loop:
+    - fulltextsearch
+    - fulltextsearch_elasticsearch
+    - files_fulltextsearch
+  changed_when: false
+
+- name: Configure the full-text search platform
+  ansible.builtin.shell: "docker exec -u www-data {{ application }}-app php occ {{ item }}"
+  loop:
+    - "config:app:set fulltextsearch search_platform --value 'OCA\\FullTextSearch_Elasticsearch\\Platform\\ElasticSearchPlatform'"
+    - "config:app:set fulltextsearch_elasticsearch elastic_host --value 'http://{{ application }}-elasticsearch:9200'"
+    - "config:app:set fulltextsearch_elasticsearch elastic_index --value 'nextcloud'"
+  changed_when: false
+
+- name: Validate the search platform connection (retry until ES is ready)
+  ansible.builtin.command: >
+    docker exec -u www-data {{ application }}-app php occ fulltextsearch:test
+  register: fts_test
+  until: fts_test.rc == 0
+  retries: 12
+  delay: 5
+  changed_when: false

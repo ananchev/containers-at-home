@@ -1,0 +1,66 @@
+---
+# Filesystem prep + restore staging. Runs first: creates the local-NVMe layout,
+# then stages a DB/config restore IF backup files are present AND the target is
+# empty (the guard below). The DB dump itself is restored later in datastores.yml,
+# once Postgres is up.
+- name: Create directories on the local NVMe
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ host_directory }}"
+    - "{{ host_directory }}/html"        # /var/www/html: app code, config, custom_apps, themes
+    - "{{ host_directory }}/postgres"
+    - "{{ host_directory }}/redis"
+
+- name: Ensure the data directory exists and is owned by www-data
+  file:
+    path: "{{ data_directory }}"
+    state: directory
+    owner: "{{ nextcloud_uid }}"
+    group: "{{ nextcloud_gid }}"
+    mode: '0770'
+
+# ----------------------------------------------------------------------
+# Restore detection (mirrors immich.yml). On a fresh install no backup
+# exists; on a rebuild the DB dump + app-config tar are restored and the
+# installer is skipped because config.php already declares 'installed'.
+# The data dir itself is restored separately by rsyncing it back from
+# the NAS array -- see notes/nextcloud.md.
+#
+# GUARD: a staged backup alone is NOT enough to trigger a restore -- it
+# must also be an EMPTY target. We restore only into a host that has no
+# config.php (config tar) and an unpopulated DB (db dump), so a stray
+# backup left in application_data/ can never clobber a live instance on
+# a routine re-run. Restore therefore only ever fires on a true rebuild.
+# ----------------------------------------------------------------------
+- name: Check if a database backup exists locally
+  set_fact:
+    nextcloud_db_backup_exists: "{{ (local_backup_folder + '/nextcloud_db.sql.gz') is file }}"
+
+- name: Check if an app-config backup exists locally
+  set_fact:
+    nextcloud_config_backup_exists: "{{ (local_backup_folder + '/backup.tar.gz') is file }}"
+
+- name: Check whether a live Nextcloud config already exists (restore guard)
+  ansible.builtin.stat:
+    path: "{{ host_directory }}/html/config/config.php"
+  register: nc_config_php
+
+- name: Copy the database backup to the remote machine
+  ansible.builtin.copy:
+    src: "{{ local_backup_folder }}/nextcloud_db.sql.gz"
+    dest: /tmp/nextcloud_db.sql.gz
+  when: nextcloud_db_backup_exists
+
+- name: Copy the app-config backup to the remote machine
+  ansible.builtin.copy:
+    src: "{{ local_backup_folder }}/backup.tar.gz"
+    dest: /tmp/nextcloud_config.tar.gz
+  when: nextcloud_config_backup_exists
+
+- name: Restore app config / custom_apps into the html volume
+  ansible.builtin.command: >
+    tar -xzf /tmp/nextcloud_config.tar.gz -C {{ host_directory }}/html
+  when: nextcloud_config_backup_exists and not nc_config_php.stat.exists

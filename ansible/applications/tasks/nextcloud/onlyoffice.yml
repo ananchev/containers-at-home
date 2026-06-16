@@ -1,0 +1,74 @@
+---
+# OnlyOffice Document Server (in-place Office editing). Self-contained — creates
+# its own dirs, runs the DS, waits for health, then installs + wires the
+# `onlyoffice` connector app. The import is tagged `onlyoffice`, so once the stack
+# exists you can redeploy just this slice:
+#   ./run-playbook.sh vhost nextcloud … --tags onlyoffice
+# (A scoped run assumes nextcloud-net already exists — true after any prior full
+# deploy; a first-ever deploy runs the whole playbook.)
+#
+# occ config:app:set only writes values (no live validation), so URL/JWT ordering
+# is cosmetic; the real check is the admin UI's connection test (and the health wait).
+- name: Create OnlyOffice Document Server data directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    # Runtime state (internal pg/redis, cache, fonts). Derived/rebuildable —
+    # NOT backed up; the container entrypoint fixes ownership on first start.
+    - "{{ host_directory }}/onlyoffice/data"
+    - "{{ host_directory }}/onlyoffice/log"
+    - "{{ host_directory }}/onlyoffice/lib"
+
+- name: Run the OnlyOffice Document Server container
+  community.docker.docker_container:
+    name: "{{ application }}-onlyoffice"
+    hostname: "{{ application }}-onlyoffice"
+    image: "{{ nextcloud_images.onlyoffice }}"
+    network_mode: "{{ docker_network }}"
+    detach: true
+    restart_policy: unless-stopped
+    ports:
+      - "{{ onlyoffice_http_port }}:80"
+    env:
+      # JWT must match the connector config below (jwt_secret/jwt_header).
+      JWT_ENABLED: "true"
+      JWT_SECRET: "{{ nextcloud_onlyoffice_jwt_secret }}"
+      JWT_HEADER: "Authorization"
+      TZ: "Europe/Amsterdam"
+    volumes:
+      - "{{ host_directory }}/onlyoffice/data:/var/www/onlyoffice/Data:z"
+      - "{{ host_directory }}/onlyoffice/log:/var/log/onlyoffice:z"
+      - "{{ host_directory }}/onlyoffice/lib:/var/lib/onlyoffice:z"
+    mounts:
+      - source: /etc/localtime
+        target: /etc/localtime
+        type: bind
+        read_only: yes
+
+- name: Wait for the OnlyOffice Document Server to be healthy
+  ansible.builtin.command: >
+    docker exec {{ application }}-onlyoffice
+    curl -fsS http://localhost/healthcheck
+  register: ds_health
+  until: ds_health.rc == 0 and 'true' in ds_health.stdout
+  retries: 60
+  delay: 5
+  changed_when: false
+
+- name: Install/enable the OnlyOffice connector app
+  ansible.builtin.shell: >
+    docker exec -u www-data {{ application }}-app php occ app:install onlyoffice
+    || docker exec -u www-data {{ application }}-app php occ app:enable onlyoffice
+  changed_when: false
+
+- name: Configure the OnlyOffice connector
+  ansible.builtin.shell: "docker exec -u www-data {{ application }}-app php occ {{ item }}"
+  loop:
+    - "config:app:set onlyoffice jwt_secret --value '{{ nextcloud_onlyoffice_jwt_secret }}'"
+    - "config:app:set onlyoffice jwt_header --value 'Authorization'"
+    - "config:app:set onlyoffice DocumentServerInternalUrl --value 'http://{{ application }}-onlyoffice/'"
+    - "config:app:set onlyoffice StorageUrl --value 'http://{{ nextcloud_lan_ip }}:{{ nextcloud_http_port }}/'"
+    - "config:app:set onlyoffice DocumentServerUrl --value '{{ onlyoffice_public_url }}/'"
+  changed_when: false

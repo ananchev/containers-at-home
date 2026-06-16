@@ -1,0 +1,136 @@
+---
+# Datastores: the docker network + the three backing services (Elasticsearch,
+# Redis, Postgres) plus the guarded DB restore. The Elasticsearch image is built
+# locally from the app_versions base with ingest-attachment baked in.
+- name: Create docker network for Nextcloud containers
+  community.docker.docker_network:
+    name: "{{ docker_network }}"
+    driver: bridge
+    state: present
+
+- name: Ensure vm.max_map_count for Elasticsearch (persistent)
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-elasticsearch.conf
+    content: "vm.max_map_count=262144\n"
+    mode: '0644'
+
+- name: Apply vm.max_map_count now
+  ansible.builtin.command: sysctl -w vm.max_map_count=262144
+  changed_when: false
+
+- name: Create Elasticsearch data directory
+  ansible.builtin.file:
+    path: "{{ host_directory }}/elasticsearch"
+    state: directory
+    owner: "{{ elasticsearch_uid }}"
+    group: "{{ elasticsearch_uid }}"
+    mode: '0755'
+
+- name: Create Elasticsearch image build directory
+  ansible.builtin.file:
+    path: /tmp/nextcloud-elasticsearch-build
+    state: directory
+    mode: '0700'
+
+- name: Write Elasticsearch Dockerfile (bake in ingest-attachment)
+  ansible.builtin.copy:
+    dest: /tmp/nextcloud-elasticsearch-build/Dockerfile
+    content: |
+      FROM {{ app_versions.nextcloud_elasticsearch.image }}
+      RUN /usr/share/elasticsearch/bin/elasticsearch-plugin install --batch ingest-attachment
+  register: es_dockerfile
+
+- name: Check whether the Elasticsearch image already exists
+  community.docker.docker_image_info:
+    name: "{{ elasticsearch_image }}"
+  register: es_image_info
+
+# Rebuild only when the Dockerfile changed (e.g. a base-image bump in
+# app_versions.nextcloud_elasticsearch) or the image is missing (removed
+# out-of-band). force_source guarantees a clean build when it does fire, so a
+# routine re-run is a genuine no-op instead of an unconditional rebuild.
+- name: Build the Elasticsearch image
+  community.docker.docker_image:
+    name: nextcloud-elasticsearch
+    tag: local
+    source: build
+    build:
+      path: /tmp/nextcloud-elasticsearch-build
+    force_source: true
+    state: present
+  when: es_dockerfile.changed or (es_image_info.images | length == 0)
+
+- name: Run Elasticsearch container
+  community.docker.docker_container:
+    name: "{{ application }}-elasticsearch"
+    hostname: "{{ application }}-elasticsearch"
+    image: "{{ elasticsearch_image }}"
+    network_mode: "{{ docker_network }}"
+    detach: true
+    restart_policy: unless-stopped
+    memory: "{{ elasticsearch_mem_limit }}"
+    ulimits:
+      - "memlock:-1:-1"
+      - "nofile:65536:65536"
+    env:
+      "discovery.type": single-node
+      "xpack.security.enabled": "false"
+      "bootstrap.memory_lock": "true"
+      ES_JAVA_OPTS: "-Xms{{ elasticsearch_heap }} -Xmx{{ elasticsearch_heap }}"
+    volumes:
+      - "{{ host_directory }}/elasticsearch:/usr/share/elasticsearch/data:Z"
+
+- name: Run Redis container (file locking + distributed cache)
+  community.docker.docker_container:
+    name: "{{ application }}-redis"
+    hostname: "{{ application }}-redis"
+    image: "{{ nextcloud_images.redis }}"
+    command: ["redis-server", "--requirepass", "{{ nextcloud_redis_password }}"]
+    network_mode: "{{ docker_network }}"
+    detach: true
+    restart_policy: unless-stopped
+    volumes:
+      - "{{ host_directory }}/redis:/data:Z"
+
+- name: Run Postgres container
+  community.docker.docker_container:
+    name: "{{ application }}-postgres"
+    hostname: "{{ application }}-postgres"
+    image: "{{ nextcloud_images.postgres }}"
+    network_mode: "{{ docker_network }}"
+    detach: true
+    restart_policy: unless-stopped
+    env:
+      POSTGRES_DB: "{{ nextcloud_db_name }}"
+      POSTGRES_USER: "{{ nextcloud_db_user }}"
+      POSTGRES_PASSWORD: "{{ nextcloud_db_password }}"
+    volumes:
+      - "{{ host_directory }}/postgres:/var/lib/postgresql/data:Z"
+
+- name: Wait for Postgres to be ready
+  ansible.builtin.command: >
+    docker exec {{ application }}-postgres
+    pg_isready -U {{ nextcloud_db_user }} -d {{ nextcloud_db_name }}
+  register: pg_ready
+  until: pg_ready.rc == 0
+  retries: 30
+  delay: 2
+  changed_when: false
+
+- name: Check whether the Nextcloud database is already populated (restore guard)
+  ansible.builtin.command: >
+    docker exec {{ application }}-postgres
+    psql -tAc "SELECT to_regclass('public.oc_users') IS NOT NULL"
+    -U {{ nextcloud_db_user }} -d {{ nextcloud_db_name }}
+  register: nc_db_populated
+  changed_when: false
+
+- name: Restore database from backup
+  when: nextcloud_db_backup_exists and (nc_db_populated.stdout | trim) != 't'
+  ansible.builtin.shell: |
+    gunzip --stdout /tmp/nextcloud_db.sql.gz \
+    | docker exec -i {{ application }}-postgres \
+        psql --dbname={{ nextcloud_db_name }} --username={{ nextcloud_db_user }} \
+        --single-transaction --set ON_ERROR_STOP=on
+  args:
+    executable: /bin/bash

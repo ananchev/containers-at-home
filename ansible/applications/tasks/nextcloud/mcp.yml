@@ -1,0 +1,97 @@
+---
+# MCP access for claude.ai (web): the stock nextcloud-mcp-server fronted by the
+# nextcloud-mcp-shim OAuth Resource Server. The `mcp` Nextcloud user + read-only
+# shares + `/AI` sandbox folder + app password are a manual bootstrap documented in
+# notes/nextcloud.md (the app password lives in the vault as
+# `nextcloud_mcp_app_password`). Both containers are stateless.
+#
+# INTERIM (see fork vars in nextcloud.yml): build the MCP server from our fork's
+# full-text-search branch. Mirrors the shim build below.
+- name: Clone the nextcloud-mcp-server fork (full-text-search)
+  ansible.builtin.git:
+    repo: "{{ nextcloud_mcp_fork_repo }}"
+    dest: "{{ nextcloud_mcp_fork_source }}"
+    version: "{{ nextcloud_mcp_fork_version }}"
+    force: true
+  register: nextcloud_mcp_fork_clone
+
+- name: Check whether the MCP fork image already exists
+  community.docker.docker_image_info:
+    name: "{{ nextcloud_mcp_fork_image }}"
+  register: nextcloud_mcp_fork_image_info
+
+# Build via the docker CLI (BuildKit) rather than community.docker.docker_image:
+# that module uses the legacy docker-py builder, which rejects the upstream
+# Dockerfile's multi-source `COPY a b c .` (BuildKit-only syntax). Keeping the
+# fork's Dockerfile pristine keeps the upstream PR clean. Build only when the
+# clone advanced (new commits on the branch) or the image is missing.
+- name: Build the nextcloud-mcp-server fork image (BuildKit)
+  ansible.builtin.command:
+    cmd: "docker build -t {{ nextcloud_mcp_fork_image }} {{ nextcloud_mcp_fork_source }}"
+  environment:
+    DOCKER_BUILDKIT: "1"
+  register: nextcloud_mcp_fork_build
+  changed_when: "'CACHED' not in nextcloud_mcp_fork_build.stderr"
+  when: nextcloud_mcp_fork_clone.changed or (nextcloud_mcp_fork_image_info.images | length == 0)
+
+- name: "Run the Nextcloud MCP server (fork full-text-search; internal-only, single-user)"
+  community.docker.docker_container:
+    name: "{{ application }}-mcp"
+    hostname: "{{ application }}-mcp"
+    image: "{{ nextcloud_images.mcp }}"
+    network_mode: "{{ docker_network }}"
+    detach: true
+    restart_policy: unless-stopped
+    env:
+      # Already a trusted domain (NEXTCLOUD_TRUSTED_DOMAINS in app.yml); the
+      # container reaches the app via the host's published port. Basic Auth
+      # with the `mcp` user's app password.
+      NEXTCLOUD_HOST: "http://{{ nextcloud_lan_ip }}:{{ nextcloud_http_port }}"
+      NEXTCLOUD_USERNAME: "{{ nextcloud_mcp_user }}"
+      NEXTCLOUD_PASSWORD: "{{ nextcloud_mcp_app_password }}"
+      TZ: "Europe/Amsterdam"
+
+- name: Clone the nextcloud-mcp-shim repo
+  ansible.builtin.git:
+    repo: "{{ nextcloud_mcp_shim_repo }}"
+    dest: "{{ nextcloud_mcp_shim_source }}"
+  register: nextcloud_mcp_shim_clone
+
+- name: Check whether the MCP shim image already exists
+  community.docker.docker_image_info:
+    name: nextcloud-mcp-shim:latest
+  register: nextcloud_mcp_shim_image_info
+
+# Build only when the clone advanced or the image is missing; force_source keeps
+# the build clean when it does fire.
+- name: Build the nextcloud-mcp-shim image
+  community.docker.docker_image:
+    name: nextcloud-mcp-shim
+    tag: latest
+    source: build
+    build:
+      path: "{{ nextcloud_mcp_shim_source }}"
+      rm: true
+    force_source: true
+    state: present
+  when: nextcloud_mcp_shim_clone.changed or (nextcloud_mcp_shim_image_info.images | length == 0)
+
+- name: Run the nextcloud-mcp-shim (OAuth RS; the only exposed endpoint)
+  community.docker.docker_container:
+    name: "{{ application }}-mcp-shim"
+    hostname: "{{ application }}-mcp-shim"
+    image: nextcloud-mcp-shim:latest
+    network_mode: "{{ docker_network }}"
+    detach: true
+    restart_policy: unless-stopped
+    ports:
+      - "{{ nextcloud_mcp_shim_port }}:8093"
+    env:
+      MCP_HTTP_ADDR: ":8093"
+      MCP_PUBLIC_URL: "{{ nextcloud_mcp_public_url }}"
+      # The shared mcp-auth AS (cycling-stack on unas) — its public URL is
+      # advertised in discovery AND checked as the token `iss`; its signing
+      # key must match. Both come from the symlinked, shared vault.
+      MCP_AUTH_SERVER_URL: "{{ mcp_auth_server.public_url }}"
+      MCP_OAUTH_SIGNING_KEY: "{{ mcp_auth_server.oauth_signing_key }}"
+      MCP_UPSTREAM_URL: "http://{{ application }}-mcp:8000"
