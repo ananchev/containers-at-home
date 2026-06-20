@@ -34,41 +34,47 @@
         name: docker
         state: present
 
-    # Relocate Podman's image/container storage (graphroot) off the 30GB root
-    # onto the 446GB NVMe /data — the qdrant-from-source build layers alone would
-    # overrun root. (runroot stays on /run tmpfs.) Equivalent to Docker's data-root.
-    - name: Ensure the relocated Podman storage directory exists on /data
-      ansible.builtin.file:
-        path: /data/containers/storage
-        state: directory
-        mode: '0700'
+    # Optionally relocate Podman's graphroot off the root filesystem. Hosts with a
+    # tiny root + a big data volume (Pi 5: 30GB root, 446GB NVMe /data) MUST move
+    # it so qdrant's from-source build layers don't overrun root. Hosts whose root
+    # IS the big disk (M2 Asahi: the NVMe btrfs) skip this and keep Podman's native
+    # /var/lib/containers/storage. Driven by the host fact `podman_graphroot`,
+    # set in host_vars only where relocation is needed. (runroot stays on /run.)
+    - name: Relocate Podman storage where a host requests it
+      when: podman_graphroot is defined
+      block:
+        - name: Ensure the relocated Podman storage directory exists
+          ansible.builtin.file:
+            path: "{{ podman_graphroot }}"
+            state: directory
+            mode: '0700'
 
-    - name: Point Podman's graphroot at /data
-      ansible.builtin.copy:
-        dest: /etc/containers/storage.conf
-        mode: '0644'
-        content: |
-          # Managed by Ansible (containers-at-home). Image/container storage lives
-          # on the 446GB NVMe /data, not the 30GB root.
-          [storage]
-          driver = "overlay"
-          runroot = "/run/containers/storage"
-          graphroot = "/data/containers/storage"
-      notify: restart podman socket
+        - name: Point Podman's graphroot at the relocated path
+          ansible.builtin.copy:
+            dest: /etc/containers/storage.conf
+            mode: '0644'
+            content: |
+              # Managed by Ansible (containers-at-home). Image/container storage
+              # relocated off the small root onto a larger volume.
+              [storage]
+              driver = "overlay"
+              runroot = "/run/containers/storage"
+              graphroot = "{{ podman_graphroot }}"
+          notify: restart podman socket
 
-    - name: Add SELinux fcontext equivalence for the relocated graphroot
-      ansible.builtin.command:
-        cmd: semanage fcontext -a -e /var/lib/containers/storage /data/containers/storage
-      register: sefcontext
-      changed_when: sefcontext.rc == 0
-      failed_when:
-        - sefcontext.rc != 0
-        - "'already defined' not in (sefcontext.stderr | default(''))"
-      notify: restart podman socket
+        - name: Add SELinux fcontext equivalence for the relocated graphroot
+          ansible.builtin.command:
+            cmd: semanage fcontext -a -e /var/lib/containers/storage {{ podman_graphroot }}
+          register: sefcontext
+          changed_when: sefcontext.rc == 0
+          failed_when:
+            - sefcontext.rc != 0
+            - "'already defined' not in (sefcontext.stderr | default(''))"
+          notify: restart podman socket
 
-    - name: Apply SELinux labels to the relocated graphroot
-      ansible.builtin.command: restorecon -R /data/containers/storage
-      changed_when: false
+        - name: Apply SELinux labels to the relocated graphroot
+          ansible.builtin.command: restorecon -R {{ podman_graphroot }}
+          changed_when: false
 
     - name: Enable Podman's Docker-API socket
       ansible.builtin.systemd:

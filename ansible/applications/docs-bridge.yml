@@ -32,10 +32,62 @@
     qdrant_api: "http://127.0.0.1:6333"
     run_sync: false   # -e run_sync=true to trigger an ingest after deploy
 
+    # docs-bridge config contract — host-INVARIANT, non-secret. The boundary with
+    # the product repo (design §6). Host-varying knobs are in
+    # host_tuning below, merged over this contract at template time.
+    docs_bridge:
+      embedding_model: BAAI/bge-m3
+      embedding_dim: 1024
+      chunk:
+        target_tokens: 400
+        overlap: 60
+        strategy: structure_aware
+      parse:
+        ocr: false              # digital PDFs; flip true only for scanned corpora
+        table_structure: true
+      qdrant:
+        host: qdrant            # network alias of the qdrant container
+        port: 6333
+      ingest:
+        two_pass: true
+      manifest_path: /data/state/manifest.sqlite
+      subjects:
+        - { name: aig,  dir: /data/docs/aig,  collection: aig }
+        - { name: esys, dir: /data/docs/esys, collection: esys }
+
+    # Per-host deployment tuning — kept in this operator playbook on purpose:
+    # NOT in host_vars (host facts only) and NOT in the product repo (the app
+    # knows nothing about its environment). Explicit per host, no defaults: a
+    # docs-bridge host missing from this map fails loudly instead of silently
+    # inheriting someone else's settings.
+    #   config           -> host-varying ingest/qdrant, merged over the contract
+    #                       above at template time
+    #   cargo_build_jobs -> qdrant from-source build parallelism (host capacity;
+    #                       gather_facts is off, so it can't be derived)
+    host_tuning:
+      pi5:                                    # Raspberry Pi 5 (8GB)
+        cargo_build_jobs: "2"
+        config:
+          ingest: { batch_size: 8 }
+          qdrant: { on_disk_vectors: false, quantization: none }
+      vhost2:                                 # Mac mini M2 (16GB) — production profile
+        cargo_build_jobs: "8"
+        config:
+          ingest: { batch_size: 64 }
+          qdrant: { on_disk_vectors: true, quantization: scalar }
+
   tasks:
     - name: Deploy docs-bridge on its designated host
       when: inventory_hostname in application_hosts[application]
       block:
+
+        # Merge this host's config tuning over the contract. combine(recursive)
+        # because Ansible does not deep-merge dict vars; the tuning's leaf keys
+        # win, everything else (embedding_model, chunk, subjects, manifest_path,
+        # ...) is preserved from the docs_bridge contract above.
+        - name: Resolve the effective docs-bridge config for this host
+          ansible.builtin.set_fact:
+            docs_bridge: "{{ docs_bridge | combine(host_tuning[inventory_hostname].config, recursive=true) }}"
 
         - name: Create host + state directories
           ansible.builtin.file:
@@ -98,7 +150,7 @@
               path: "{{ source_path }}/images/qdrant"
               args:
                 QDRANT_VERSION: "{{ qdrant_version }}"
-                CARGO_BUILD_JOBS: "2"
+                CARGO_BUILD_JOBS: "{{ host_tuning[inventory_hostname].cargo_build_jobs }}"
               rm: true
 
         # (3) Reclaim space: drop the multi-stage builder layers (the Rust target

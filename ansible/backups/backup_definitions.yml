@@ -5,8 +5,10 @@ backup_definitions:
   # long-running container to exec into). Corpora are source docs, managed
   # separately / re-ingestable (design §10).
   # Per collection: POST a snapshot -> download the .snapshot file -> DELETE it
-  # from Qdrant's store. Missing collections are skipped. Restore is in the deploy
-  # playbook via the snapshot upload API.
+  # from Qdrant's store. Collections are discovered live from Qdrant (so this
+  # stays decoupled from the app's config, which lives in the deploy playbook);
+  # an empty Qdrant -> nothing to do. Restore is in the deploy playbook via the
+  # snapshot upload API.
   - application: docs-bridge
     container: qdrant
     backup_commands: []
@@ -15,8 +17,8 @@ backup_definitions:
       - >-
         set -e;
         D="{{ backups_directory }}/{{ backup_timestamp }}/docs-bridge";
-        for c in {{ docs_bridge.subjects | map(attribute='collection') | join(' ') }}; do
-          curl -sf "http://127.0.0.1:6333/collections/$c" >/dev/null 2>&1 || continue;
+        for c in $(curl -sf "http://127.0.0.1:6333/collections"
+          | python3 -c 'import sys,json;print(" ".join(x["name"] for x in json.load(sys.stdin)["result"]["collections"]))'); do
           snap=$(curl -sf -X POST "http://127.0.0.1:6333/collections/$c/snapshots"
           | python3 -c 'import sys,json;print(json.load(sys.stdin)["result"]["name"])');
           curl -sf "http://127.0.0.1:6333/collections/$c/snapshots/$snap" -o "$D/$c.snapshot";

@@ -1,5 +1,7 @@
 application_hosts:
-  docs-bridge: pi5
+  docs-bridge:
+    - pi5
+    - vhost2
   afvalwijzer: fed
   authelia: fed
   containers-backup:

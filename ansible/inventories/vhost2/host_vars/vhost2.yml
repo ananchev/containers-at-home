@@ -1,0 +1,20 @@
+# Host-specific vars for vhost2 (Mac mini M2, 16GB, Fedora Asahi Remix 44).
+# aarch64, 16K-page kernel, SELinux enforcing. SSH key is supplied on the
+# run-playbook.sh CLI (~/.ssh/id_ed25519_vhost). sudo needs a password here, so
+# all runs add -K (--ask-become-pass).
+
+ansible_user: ananchev
+# Set inline (not only via the [fedora] group) so it applies even on direct
+# `ansible-playbook -i inventories/vhost2/hosts` runs.
+ansible_python_interpreter: /usr/bin/python3
+# Fedora Asahi root is a single ~374GB btrfs (/ and /home share nvme0n1p6); there
+# is no separate data mount like the Pi's /data. Use /data as a *directory* on
+# root so the config contract's /data/... paths stay identical to the Pi.
+docker_data_root: /data/docker
+# docs-bridge payload root (corpora, manifest, model cache, Qdrant storage).
+docs_bridge_data_root: /data/docs-bridge-payload
+# Podman behind its Docker-API socket (design §3); community.docker.* drive it.
+container_runtime: podman
+# podman_graphroot intentionally UNSET: root IS the big disk here, so keep
+# Podman's native /var/lib/containers/storage (the Pi relocates because its root
+# is tiny). See pre-requisites-podman.yml.

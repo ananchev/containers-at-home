@@ -1,0 +1,5 @@
+[homelab]
+vhost2 ansible_host=192.168.2.199
+
+[fedora]
+vhost2
