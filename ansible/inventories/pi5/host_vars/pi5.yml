@@ -1,0 +1,17 @@
+# Host-specific vars for the Pi 5 (Rocky Linux 10 on NVMe).
+# SSH key is supplied on the run-playbook.sh CLI (~/.ssh/id_ed25519_pi5).
+
+ansible_user: ananchev
+# Set here (not only in group_vars/rocky.yml) so it applies even on direct
+# `ansible-playbook -i inventories/pi5/hosts` runs, before run-playbook.sh has
+# created the group_vars symlink.
+ansible_python_interpreter: /usr/bin/python3
+# /data is the 446 GB XFS partition on the NVMe; keep all container state there.
+docker_data_root: /data/docker
+# docs-bridge payload root (corpora, manifest, model cache, Qdrant storage).
+# Host-specific on purpose — the M2 will set its own (mounted to /data inside
+# the containers regardless, so the config contract stays host-agnostic).
+docs_bridge_data_root: /data
+# This host runs Podman behind its Docker-API socket (design §3); the
+# community.docker.* modules drive it unchanged.
+container_runtime: podman

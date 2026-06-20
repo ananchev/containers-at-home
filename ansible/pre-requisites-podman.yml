@@ -1,0 +1,102 @@
+# Podman runtime for RHEL-family hosts (Pi 5 Rocky 10, later M2 Asahi Fedora).
+#
+# The fleet drives every app with community.docker.* modules. Here we expose
+# Podman through its Docker-API socket so those modules connect unchanged
+# (design §3 / deployment-boundary memory):
+#   podman + podman-docker  -> /run/docker.sock compatibility shim
+#   podman.socket           -> the Docker-compatible API endpoint
+#   podman-restart.service  -> reproduces `restart_policy: unless-stopped` on boot
+#
+# Run with:  ./run-playbook.sh pi5 ../pre-requisites-podman <key>   (see note below)
+# or directly:  ansible-playbook -i inventories/pi5/hosts --private-key <key> \
+#                 --ask-vault-pass pre-requisites-podman.yml
+- hosts: homelab
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Install Podman, the Docker-API shim, and tooling
+      ansible.builtin.dnf:
+        name:
+          - podman
+          - podman-docker                 # ships the /run/docker.sock shim + docker alias
+          - python3-pip
+          - python3-packaging             # ansible.builtin.pip needs it to parse versions
+          - python3-setuptools            # pkg_resources for pip installs
+          - policycoreutils-python-utils  # semodule/semanage (custom SELinux policy templates)
+          - checkpolicy                   # checkmodule for compiling .te policy
+          - git                           # build-context delivery / source clones
+          - curl                          # Qdrant snapshot API (backup/restore)
+        state: present
+
+    - name: Install the Docker SDK for Python (community.docker driver)
+      ansible.builtin.pip:
+        name: docker
+        state: present
+
+    # Relocate Podman's image/container storage (graphroot) off the 30GB root
+    # onto the 446GB NVMe /data — the qdrant-from-source build layers alone would
+    # overrun root. (runroot stays on /run tmpfs.) Equivalent to Docker's data-root.
+    - name: Ensure the relocated Podman storage directory exists on /data
+      ansible.builtin.file:
+        path: /data/containers/storage
+        state: directory
+        mode: '0700'
+
+    - name: Point Podman's graphroot at /data
+      ansible.builtin.copy:
+        dest: /etc/containers/storage.conf
+        mode: '0644'
+        content: |
+          # Managed by Ansible (containers-at-home). Image/container storage lives
+          # on the 446GB NVMe /data, not the 30GB root.
+          [storage]
+          driver = "overlay"
+          runroot = "/run/containers/storage"
+          graphroot = "/data/containers/storage"
+      notify: restart podman socket
+
+    - name: Add SELinux fcontext equivalence for the relocated graphroot
+      ansible.builtin.command:
+        cmd: semanage fcontext -a -e /var/lib/containers/storage /data/containers/storage
+      register: sefcontext
+      changed_when: sefcontext.rc == 0
+      failed_when:
+        - sefcontext.rc != 0
+        - "'already defined' not in (sefcontext.stderr | default(''))"
+      notify: restart podman socket
+
+    - name: Apply SELinux labels to the relocated graphroot
+      ansible.builtin.command: restorecon -R /data/containers/storage
+      changed_when: false
+
+    - name: Enable Podman's Docker-API socket
+      ansible.builtin.systemd:
+        name: podman.socket
+        state: started
+        enabled: true
+
+    # Pick up the relocated graphroot before the smoke test below uses the socket.
+    - name: Apply storage relocation now (restart socket if it changed)
+      ansible.builtin.meta: flush_handlers
+
+    - name: Enable podman-restart (restores unless-stopped containers on boot)
+      ansible.builtin.systemd:
+        name: podman-restart.service
+        enabled: true
+
+    - name: Materialise the /run/docker.sock compatibility symlink now
+      # podman-docker ships this as a tmpfiles.d entry; create it without a reboot
+      # so community.docker can connect to unix://var/run/docker.sock immediately.
+      ansible.builtin.command: systemd-tmpfiles --create
+      changed_when: false
+
+    - name: Confirm the Docker-compatible socket answers
+      ansible.builtin.command: docker version
+      changed_when: false
+
+  handlers:
+    - name: restart podman socket
+      ansible.builtin.systemd:
+        name: podman.socket
+        state: restarted

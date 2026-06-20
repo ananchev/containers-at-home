@@ -1,0 +1,4 @@
+# Group variables for Rocky Linux (RHEL-family) hosts.
+# Applies to all hosts in the 'rocky' inventory group.
+
+ansible_python_interpreter: /usr/bin/python3

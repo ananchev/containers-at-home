@@ -1,0 +1,31 @@
+# Managed by Ansible (containers-at-home). Do not edit on the host.
+# Rendered from group_vars/all/docs_bridge.yml — the config contract with the
+# docs-bridge product repo (design §6). Mounted at /config/config.yaml.
+embedding_model: {{ docs_bridge.embedding_model }}
+embedding_dim: {{ docs_bridge.embedding_dim }}
+
+chunk:
+  target_tokens: {{ docs_bridge.chunk.target_tokens }}
+  overlap: {{ docs_bridge.chunk.overlap }}
+  strategy: {{ docs_bridge.chunk.strategy }}
+
+parse:
+  ocr: {{ docs_bridge.parse.ocr | string | lower }}
+  table_structure: {{ docs_bridge.parse.table_structure | string | lower }}
+
+qdrant:
+  host: {{ docs_bridge.qdrant.host }}
+  port: {{ docs_bridge.qdrant.port }}
+  on_disk_vectors: {{ docs_bridge.qdrant.on_disk_vectors | string | lower }}
+  quantization: {{ docs_bridge.qdrant.quantization }}
+
+ingest:
+  batch_size: {{ docs_bridge.ingest.batch_size }}
+  two_pass: {{ docs_bridge.ingest.two_pass | string | lower }}
+
+manifest_path: {{ docs_bridge.manifest_path }}
+
+subjects:
+{% for s in docs_bridge.subjects %}
+  - { name: {{ s.name }}, dir: {{ s.dir }}, collection: {{ s.collection }} }
+{% endfor %}

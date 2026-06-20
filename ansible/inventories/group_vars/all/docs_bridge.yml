@@ -1,0 +1,32 @@
+# docs-bridge — shared config contract (the boundary with the product repo).
+# NON-SECRET only. Secrets (OpenRouter key, MCP bearer token) live in vault.yml
+# and get wired in the docs-bridge *server* step, not for ingestion.
+#
+# Values here are Pi-appropriate (tiny corpus, 8GB RAM). When the M2 comes online,
+# override on_disk_vectors / quantization / ingest.batch_size in macmini host_vars.
+
+docs_bridge:
+  embedding_model: BAAI/bge-m3
+  embedding_dim: 1024
+  chunk:
+    target_tokens: 400
+    overlap: 60
+    strategy: structure_aware
+  parse:
+    ocr: false              # digital PDFs; flip true only for scanned corpora
+    table_structure: true
+  qdrant:
+    host: qdrant            # network alias of the qdrant container
+    port: 6333
+    on_disk_vectors: false  # pi5: tiny corpus | macmini: true
+    quantization: none      # none | scalar
+  ingest:
+    batch_size: 8           # pi5: keep peak RAM < 8GB | macmini: 64
+    two_pass: true
+  manifest_path: /data/state/manifest.sqlite
+  subjects:
+    - { name: aig, dir: /data/docs/aig, collection: aig }
+    - { name: esys, dir: /data/docs/esys,  collection: esys }
+
+# Image version is pinned centrally in the vaulted app_versions.yml as
+# `docs-bridge-qdrant.image` (see deploy playbook).

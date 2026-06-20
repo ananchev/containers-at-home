@@ -1,0 +1,244 @@
+---
+# docs-bridge — deploy (operator side). This slice brings up Qdrant and builds +
+# runs the ingest-worker, which is enough to validate INGESTION against Qdrant
+# directly (design §11/§15). The docs-bridge MCP server is added in a later step.
+#
+# Build context: cloned from the product repo github.com/ananchev/docs-bridge.
+# Runtime: Podman via its Docker-API socket (pre-requisites-podman.yml).
+# Image pin: app_versions['docs-bridge-qdrant'].image (vaulted app_versions.yml).
+#
+#   ./run-playbook.sh pi5 docs-bridge ~/.ssh/id_ed25519_pi5
+#   ./run-playbook.sh pi5 docs-bridge ~/.ssh/id_ed25519_pi5 -e run_sync=true   # + ingest
+- hosts: homelab
+  become: true
+  gather_facts: false
+  vars:
+    application: docs-bridge
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    docker_network: docs-bridge-net
+    repo: https://github.com/ananchev/docs-bridge.git
+    source_path: "{{ host_directory }}/source"
+    config_file: "{{ host_directory }}/config/config.yaml"
+    # Host-specific payload root (host_vars). Containers always see it as /data,
+    # so the config contract's /data/... paths stay host-agnostic.
+    data_root: "{{ docs_bridge_data_root }}"
+    container_data_root: /data
+    # Built from source (the official image's jemalloc aborts on the Pi/M2 16K
+    # pages), but the version stays pinned in app_versions.yml as the UPSTREAM ref
+    # so diun still notifies on new qdrant releases. We reuse that exact tag for
+    # the local build and derive the QDRANT_VERSION build-arg from it.
+    qdrant_image: "{{ app_versions[application + '-qdrant'].image }}"   # e.g. qdrant/qdrant:v1.18.2
+    qdrant_version: "{{ qdrant_image | regex_replace('^.*:', '') }}"    # e.g. v1.18.2
+    qdrant_api: "http://127.0.0.1:6333"
+    run_sync: false   # -e run_sync=true to trigger an ingest after deploy
+
+  tasks:
+    - name: Deploy docs-bridge on its designated host
+      when: inventory_hostname in application_hosts[application]
+      block:
+
+        - name: Create host + state directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            mode: '0755'
+          loop:
+            - "{{ host_directory }}"
+            - "{{ host_directory }}/config"
+            - "{{ data_root }}/state"    # SQLite manifest
+            - "{{ data_root }}/cache"    # HF + Docling model caches (HOME)
+            - "{{ data_root }}/qdrant"   # Qdrant storage
+
+        - name: Create per-subject corpus directories
+          # Human-populated drop folders -> owned by the deploy user so docs can be
+          # scp'd in without sudo. The container reads them as root regardless.
+          # (Map the container path in the contract /data/... to the host root.)
+          ansible.builtin.file:
+            path: "{{ data_root }}{{ item.dir | regex_replace('^' ~ container_data_root, '') }}"
+            state: directory
+            owner: "{{ ansible_user }}"
+            group: "{{ ansible_user }}"
+            mode: '0755'
+          loop: "{{ docs_bridge.subjects }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: Clone/update the docs-bridge product repo
+          ansible.builtin.git:
+            repo: "{{ repo }}"
+            dest: "{{ source_path }}"
+            version: main
+
+        - name: Render ingest config.yaml from the config contract
+          ansible.builtin.template:
+            src: ../_templates/docs-bridge-config.yaml.j2
+            dest: "{{ config_file }}"
+            mode: '0644'
+
+        # The one rough edge to smoke-test: docker_image build over Podman's
+        # compat API (design §3 / deployment-boundary memory).
+        - name: Build the ingest-worker image
+          community.docker.docker_image:
+            name: ingest-worker:latest
+            source: build
+            build:
+              path: "{{ source_path }}/images/ingest-worker"
+              rm: true
+
+        # From-source build (jemalloc for 16K pages). Long compile on the Pi
+        # (~30-60min, thin LTO + 2 jobs to fit 8GB); only rebuilds when the image
+        # is absent, so redeploys skip it. Bumping the version in app_versions
+        # changes the tag -> next deploy rebuilds. Tagged as the upstream ref so
+        # diun watches qdrant/qdrant for new releases.
+        - name: Build the qdrant image (16K-page jemalloc, version from app_versions)
+          community.docker.docker_image:
+            name: "{{ qdrant_image }}"
+            source: build
+            build:
+              path: "{{ source_path }}/images/qdrant"
+              args:
+                QDRANT_VERSION: "{{ qdrant_version }}"
+                CARGO_BUILD_JOBS: "2"
+              rm: true
+
+        # (3) Reclaim space: drop the multi-stage builder layers (the Rust target
+        # is several GB) and any leftover build containers.
+        - name: Prune dangling build images
+          ansible.builtin.command: docker image prune -f
+          changed_when: true
+
+        - name: Prune leftover build containers
+          ansible.builtin.command: docker container prune -f
+          changed_when: false
+
+        - name: Create the docker network
+          community.docker.docker_network:
+            name: "{{ docker_network }}"
+            driver: bridge
+            state: present
+
+        - name: Run Qdrant (vector store)
+          community.docker.docker_container:
+            name: qdrant
+            image: "{{ qdrant_image }}"
+            network_mode: "{{ docker_network }}"
+            env:
+              # Bind all interfaces INSIDE the container; the from-source default
+              # (config/development.yaml) binds 127.0.0.1, which published ports
+              # and the docs-bridge-net peers can't reach.
+              QDRANT__SERVICE__HOST: "0.0.0.0"
+            ports:
+              - "127.0.0.1:6333:6333"   # host-local, for curl validation + snapshot API
+            volumes:
+              - "{{ data_root }}/qdrant:/qdrant/storage:z"   # :z shared (ingest + server also use /data)
+            restart_policy: unless-stopped
+            detach: true
+
+        - name: Wait for Qdrant to accept connections
+          ansible.builtin.wait_for:
+            host: 127.0.0.1
+            port: 6333
+            timeout: 60
+
+        - name: Wait for Qdrant readiness
+          ansible.builtin.uri:
+            url: "{{ qdrant_api }}/readyz"
+            status_code: 200
+          register: qready
+          retries: 10
+          delay: 3
+          until: qready.status == 200
+
+        # --- Restore-on-fresh-deploy via Qdrant snapshot API (idempotent) ----
+        # Recovery needs a live Qdrant, so it runs after readiness. Per collection:
+        #   snapshot absent       -> do nothing
+        #   snapshot + collection missing  -> recover it
+        #   collection already present (redeploy) -> leave it alone
+        # Archives are staged on the control node at application_data/docs-bridge/.
+        # Control-node file presence is discovered with the fileglob lookup, which
+        # runs on the controller (no delegate_to: localhost, which can hang under a
+        # become: true play). copy/unarchive read their src from the controller
+        # natively. An empty/absent application_data dir -> staged_files == [] ->
+        # every restore is skipped (the "no backup" case).
+        - name: Discover staged restore archives on the control node
+          ansible.builtin.set_fact:
+            staged_files: "{{ lookup('ansible.builtin.fileglob', application_data ~ '/' ~ application ~ '/*', wantlist=true) | map('basename') | list }}"
+
+        - name: Check which collections already exist in Qdrant
+          ansible.builtin.uri:
+            url: "{{ qdrant_api }}/collections/{{ item.collection }}"
+            status_code: [200, 404]
+          register: coll_check
+          loop: "{{ docs_bridge.subjects }}"
+          loop_control:
+            label: "{{ item.collection }}"
+
+        - name: Stage snapshots on the host for collections needing restore
+          ansible.builtin.copy:
+            src: "{{ application_data }}/{{ application }}/{{ item.0.collection }}.snapshot"
+            dest: "/tmp/{{ item.0.collection }}.snapshot"
+            mode: '0644'
+          when:
+            - (item.0.collection ~ '.snapshot') in staged_files   # snapshot staged
+            - item.1.status == 404                                # collection absent
+          loop: "{{ docs_bridge.subjects | zip(coll_check.results) | list }}"
+          loop_control:
+            label: "{{ item.0.collection }}"
+
+        - name: Recover collections from uploaded snapshots
+          ansible.builtin.command: >
+            curl -sf -X POST
+            "{{ qdrant_api }}/collections/{{ item.0.collection }}/snapshots/upload?priority=snapshot"
+            -F "snapshot=@/tmp/{{ item.0.collection }}.snapshot"
+          when:
+            - (item.0.collection ~ '.snapshot') in staged_files
+            - item.1.status == 404
+          loop: "{{ docs_bridge.subjects | zip(coll_check.results) | list }}"
+          loop_control:
+            label: "{{ item.0.collection }}"
+
+        - name: Clean up staged snapshot files
+          ansible.builtin.file:
+            path: "/tmp/{{ item.collection }}.snapshot"
+            state: absent
+          loop: "{{ docs_bridge.subjects }}"
+          loop_control:
+            label: "{{ item.collection }}"
+
+        # Manifest (SQLite) — restore only when absent (a fresh deploy).
+        - name: Check whether the manifest already exists on the host
+          ansible.builtin.stat:
+            path: "{{ docs_bridge.manifest_path | regex_replace('^' ~ container_data_root, data_root) }}"
+          register: manifest_dst
+
+        - name: Restore the manifest (fresh deploy only)
+          ansible.builtin.unarchive:
+            src: "{{ application_data }}/{{ application }}/state.tar.gz"
+            dest: "{{ data_root }}/state"
+            remote_src: false
+          when:
+            - "'state.tar.gz' in staged_files"
+            - not manifest_dst.stat.exists
+
+        # One-shot ingest. A `docker run` shell task (not docker_container) so we
+        # capture the sync's stdout for the §15 idempotency check (0/0/0 on no change).
+        - name: Run a one-shot ingest sync
+          when: run_sync | bool
+          # Mount only the subdirs the worker needs (each :z relabels fine).
+          # Podman refuses to relabel a whole filesystem-root mount like /data, and
+          # relabeling 446GB (incl. qdrant's live storage) every run would be wrong.
+          ansible.builtin.command: >
+            docker run --rm
+            --network {{ docker_network }}
+            -v {{ data_root }}/docs:{{ container_data_root }}/docs:ro,z
+            -v {{ data_root }}/state:{{ container_data_root }}/state:z
+            -v {{ data_root }}/cache:{{ container_data_root }}/cache:z
+            -v {{ config_file }}:/config/config.yaml:ro,z
+            ingest-worker:latest sync --subject all --verbose
+          register: ingest_run
+          changed_when: true
+
+        - name: Show ingest result
+          when: run_sync | bool
+          ansible.builtin.debug:
+            var: ingest_run.stdout_lines

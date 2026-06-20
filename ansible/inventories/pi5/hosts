@@ -1,0 +1,5 @@
+[homelab]
+pi5 ansible_host=192.168.2.11
+
+[rocky]
+pi5

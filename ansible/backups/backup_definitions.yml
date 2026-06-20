@@ -1,4 +1,31 @@
 backup_definitions:
+  # docs-bridge: derived state only — Qdrant collections (consistent snapshot via
+  # the Qdrant snapshot API, NOT a live tar) + the SQLite manifest. Done host-side
+  # because the data lives on bind mounts and the ingest-worker is a one-shot (no
+  # long-running container to exec into). Corpora are source docs, managed
+  # separately / re-ingestable (design §10).
+  # Per collection: POST a snapshot -> download the .snapshot file -> DELETE it
+  # from Qdrant's store. Missing collections are skipped. Restore is in the deploy
+  # playbook via the snapshot upload API.
+  - application: docs-bridge
+    container: qdrant
+    backup_commands: []
+    copy_actions: []
+    host_commands:
+      - >-
+        set -e;
+        D="{{ backups_directory }}/{{ backup_timestamp }}/docs-bridge";
+        for c in {{ docs_bridge.subjects | map(attribute='collection') | join(' ') }}; do
+          curl -sf "http://127.0.0.1:6333/collections/$c" >/dev/null 2>&1 || continue;
+          snap=$(curl -sf -X POST "http://127.0.0.1:6333/collections/$c/snapshots"
+          | python3 -c 'import sys,json;print(json.load(sys.stdin)["result"]["name"])');
+          curl -sf "http://127.0.0.1:6333/collections/$c/snapshots/$snap" -o "$D/$c.snapshot";
+          curl -sf -X DELETE "http://127.0.0.1:6333/collections/$c/snapshots/$snap" >/dev/null;
+        done
+      - >-
+        tar -czf "{{ backups_directory }}/{{ backup_timestamp }}/docs-bridge/state.tar.gz"
+        -C {{ docs_bridge_data_root }}/state .
+
   - application: zigbee2mqtt
     container: zigbee2mqtt
     backup_commands:
