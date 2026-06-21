@@ -38,6 +38,11 @@
     docs_bridge:
       embedding_model: BAAI/bge-m3
       embedding_dim: 1024
+      # ONNX/INT8 is the validated default (eval 2026-06-21: 4.5x faster than
+      # FlagEmbedding/torch, retrieval quality on par). The INT8 model is baked into
+      # the ingest-worker image; flip to flagembedding only as a torch fallback.
+      embedding_backend: onnx
+      embedding_int8: true
       chunk:
         target_tokens: 400
         overlap: 60

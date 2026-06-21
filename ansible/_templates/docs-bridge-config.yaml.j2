@@ -3,6 +3,10 @@
 # applications/docs-bridge.yml (design §6). Mounted at /config/config.yaml.
 embedding_model: {{ docs_bridge.embedding_model }}
 embedding_dim: {{ docs_bridge.embedding_dim }}
+# Embed backend: onnx (ONNX/INT8, validated default — 4.5x faster, on-par quality)
+# or flagembedding (torch fallback). int8 selects the baked model.int8.onnx.
+embedding_backend: {{ docs_bridge.embedding_backend }}
+embedding_int8: {{ docs_bridge.embedding_int8 | string | lower }}
 
 chunk:
   target_tokens: {{ docs_bridge.chunk.target_tokens }}
