@@ -30,11 +30,21 @@
             repo: 'https://github.com/ananchev/containers-at-home.git' 
             dest: "{{ host_directory }}"
 
-      - name: Build the image
-        community.docker.docker_image_build:
+      # Mixed fleet: Docker hosts (fed/unas/bnod/vhost) + Podman-via-compat-socket
+      # hosts (vhost2). docker_image (source: build) drives the plain Docker-compat
+      # build API that BOTH runtimes expose; docker_image_build negotiates with a
+      # native Docker client and fails on Podman ("Cannot determine Docker client
+      # information"). This matches every other app playbook. force_source rebuilds
+      # each deploy so repo changes baked in via `COPY ansible/` are picked up.
+      - name: Build the backup-node image
+        community.docker.docker_image:
           name: backup-node
-          path: "{{ host_directory }}"
-          dockerfile: ansible/backups/Dockerfile
+          source: build
+          force_source: true
+          build:
+            path: "{{ host_directory }}"
+            dockerfile: ansible/backups/Dockerfile
+            rm: true
 
       - name: Run the container
         community.docker.docker_container:
