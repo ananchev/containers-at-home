@@ -29,6 +29,19 @@ ingest:
 
 manifest_path: {{ docs_bridge.manifest_path }}
 
+# docs-bridge server only (ignored by the ingest-worker).
+rerank:
+  enabled: {{ docs_bridge.rerank.enabled | string | lower }}
+  model_dir: {{ docs_bridge.rerank.model_dir }}
+  int8: {{ docs_bridge.rerank.int8 | string | lower }}
+  max_length: {{ docs_bridge.rerank.max_length }}
+  top_n: {{ docs_bridge.rerank.top_n }}
+
+server:
+  port: {{ docs_bridge.server.port }}
+  default_k: {{ docs_bridge.server.default_k }}
+  prefetch_limit: {{ docs_bridge.server.prefetch_limit }}
+
 subjects:
 {% for s in docs_bridge.subjects %}
   - { name: {{ s.name }}, dir: {{ s.dir }}, collection: {{ s.collection }} }

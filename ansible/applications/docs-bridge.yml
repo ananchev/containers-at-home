@@ -1,11 +1,17 @@
 ---
-# docs-bridge — deploy (operator side). This slice brings up Qdrant and builds +
-# runs the ingest-worker, which is enough to validate INGESTION against Qdrant
-# directly (design §11/§15). The docs-bridge MCP server is added in a later step.
+# docs-bridge — deploy (operator side). Brings up Qdrant, builds + runs the
+# ingest-worker (INGESTION, design §11/§15) AND the docs-bridge server (MCP + REST
+# search/rerank surface, design §9/§15).
 #
-# Build context: cloned from the product repo github.com/ananchev/docs-bridge.
+# Build context: cloned from the product repo github.com/ananchev/docs-bridge. Both
+# images build from the repo ROOT (the docs_bridge package + tools/ are shared);
+# the server image bakes the INT8 bge-m3 + bge-reranker models, so — like the
+# ingest-worker — it CANNOT build on the 8GB Pi (quantize OOMs). Build both on the
+# M2 and pre-load on the Pi; the build tasks have no force_source, so they SKIP when
+# the image is present and the deploy proceeds straight to the containers.
 # Runtime: Podman via its Docker-API socket (pre-requisites-podman.yml).
 # Image pin: app_versions['docs-bridge-qdrant'].image (vaulted app_versions.yml).
+# Secret:    docs_bridge_secrets.bearer_token (vault) -> server's DOCS_BRIDGE_TOKEN.
 #
 #   ./run-playbook.sh pi5 docs-bridge ~/.ssh/id_ed25519_pi5
 #   ./run-playbook.sh pi5 docs-bridge ~/.ssh/id_ed25519_pi5 -e run_sync=true   # + ingest
@@ -30,6 +36,7 @@
     qdrant_image: "{{ app_versions[application + '-qdrant'].image }}"   # e.g. qdrant/qdrant:v1.18.2
     qdrant_version: "{{ qdrant_image | regex_replace('^.*:', '') }}"    # e.g. v1.18.2
     qdrant_api: "http://127.0.0.1:6333"
+    server_image: "{{ application }}:latest"   # docs-bridge:latest, built from source like ingest-worker
     run_sync: false   # -e run_sync=true to trigger an ingest after deploy
 
     # docs-bridge config contract — host-INVARIANT, non-secret. The boundary with
@@ -56,6 +63,18 @@
       ingest:
         two_pass: true
       manifest_path: /data/state/manifest.sqlite
+      # docs-bridge SERVER only (the ingest-worker parses these but ignores them).
+      # model_dir is the path baked into the docs-bridge image.
+      rerank:
+        enabled: true
+        model_dir: /opt/bge-reranker-onnx
+        int8: true
+        max_length: 512
+        top_n: 30
+      server:
+        port: 8080
+        default_k: 6
+        prefetch_limit: 50
       subjects:
         - { name: aig,  dir: /data/docs/aig,  collection: aig }
         - { name: esys, dir: /data/docs/esys, collection: esys }
@@ -132,14 +151,26 @@
             dest: "{{ config_file }}"
             mode: '0644'
 
-        # The one rough edge to smoke-test: docker_image build over Podman's
-        # compat API (design §3 / deployment-boundary memory).
+        # docker_image build over Podman's compat API (design §3 / deployment-
+        # boundary memory). Context = repo ROOT (shared docs_bridge package),
+        # Dockerfile under images/. No force_source -> SKIPS when the image is
+        # present, so the Pi runs a pre-loaded image instead of building (it can't).
         - name: Build the ingest-worker image
           community.docker.docker_image:
             name: ingest-worker:latest
             source: build
             build:
-              path: "{{ source_path }}/images/ingest-worker"
+              path: "{{ source_path }}"
+              dockerfile: images/ingest-worker/Dockerfile
+              rm: true
+
+        - name: Build the docs-bridge server image
+          community.docker.docker_image:
+            name: "{{ server_image }}"
+            source: build
+            build:
+              path: "{{ source_path }}"
+              dockerfile: images/docs-bridge/Dockerfile
               rm: true
 
         # From-source build (jemalloc for 16K pages). Long compile on the Pi
@@ -276,6 +307,28 @@
           when:
             - "'state.tar.gz' in staged_files"
             - not manifest_dst.stat.exists
+
+        # --- docs-bridge server (MCP + REST), design §9/§15 ------------------
+        # Holds the baked INT8 bge-m3 (query embed) + bge-reranker; talks to qdrant
+        # over the network (lazy-connect, so no startup ordering dependency). Only
+        # mounts the rendered config + a writable cache dir (models are baked, not
+        # mounted). Published host-local for the §15 curl validation; public
+        # exposure via NPM/Cloudflare comes with the M2/LibreChat step.
+        - name: Run the docs-bridge server
+          community.docker.docker_container:
+            name: "{{ application }}"
+            image: "{{ server_image }}"
+            network_mode: "{{ docker_network }}"
+            env:
+              DOCS_BRIDGE_CONFIG: /config/config.yaml
+              DOCS_BRIDGE_TOKEN: "{{ docs_bridge_secrets.bearer_token }}"
+            ports:
+              - "127.0.0.1:{{ docs_bridge.server.port }}:{{ docs_bridge.server.port }}"
+            volumes:
+              - "{{ config_file }}:/config/config.yaml:ro,z"
+              - "{{ data_root }}/cache:/data/cache:z"
+            restart_policy: unless-stopped
+            detach: true
 
         # One-shot ingest. A `docker run` shell task (not docker_container) so we
         # capture the sync's stdout for the §15 idempotency check (0/0/0 on no change).
