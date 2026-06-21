@@ -1,44 +1,37 @@
 backup_definitions:
-  # docs-bridge: derived state only — Qdrant collections (consistent snapshot via
-  # the Qdrant snapshot API, NOT a live tar) + the SQLite manifest. Done host-side
-  # because the data lives on bind mounts and the ingest-worker is a one-shot (no
-  # long-running container to exec into). Corpora are source docs, managed
-  # separately / re-ingestable (design §10) — we do NOT back up /data/docs, but we
-  # DO emit docs-manifest.tsv (sha256<TAB>bytes<TAB>relpath, recursive over
-  # /data/docs) so a restored index can be traced back to the exact source files.
-  # Per collection: POST a snapshot -> download the .snapshot file -> DELETE it
-  # from Qdrant's store. Collections are discovered live from Qdrant (so this
-  # stays decoupled from the app's config, which lives in the deploy playbook);
-  # an empty Qdrant -> nothing to do. Restore is in the deploy playbook via the
-  # snapshot upload API.
+  # docs-bridge: back up DERIVED state only (the corpus under /data/docs is
+  # re-ingestable source, kept elsewhere). One readable script, three steps. Run
+  # host-side because the data is on bind mounts and the ingest-worker is one-shot.
+  # Restore is in the deploy playbook (snapshot upload API + manifest untar).
   - application: docs-bridge
     container: qdrant
     backup_commands: []
     copy_actions: []
     host_commands:
-      - >-
-        set -e;
-        D="{{ backups_directory }}/{{ backup_timestamp }}/docs-bridge";
-        for c in $(curl -sf "http://127.0.0.1:6333/collections"
-          | python3 -c 'import sys,json;print(" ".join(x["name"] for x in json.load(sys.stdin)["result"]["collections"]))'); do
-          snap=$(curl -sf -X POST "http://127.0.0.1:6333/collections/$c/snapshots"
-          | python3 -c 'import sys,json;print(json.load(sys.stdin)["result"]["name"])');
-          curl -sf "http://127.0.0.1:6333/collections/$c/snapshots/$snap" -o "$D/$c.snapshot";
-          curl -sf -X DELETE "http://127.0.0.1:6333/collections/$c/snapshots/$snap" >/dev/null;
+      - |
+        set -e
+        dest="{{ backups_directory }}/{{ backup_timestamp }}/docs-bridge"
+        qdrant=http://127.0.0.1:6333
+
+        # 1. One consistent snapshot per Qdrant collection (discovered live so this
+        #    stays decoupled from app config): create, download, drop from the store.
+        for name in $(curl -sf "$qdrant/collections" | python3 -c 'import json,sys; print(*[c["name"] for c in json.load(sys.stdin)["result"]["collections"]])'); do
+          snap=$(curl -sf -X POST "$qdrant/collections/$name/snapshots" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["name"])')
+          curl -sf "$qdrant/collections/$name/snapshots/$snap" -o "$dest/$name.snapshot"
+          curl -sf -X DELETE "$qdrant/collections/$name/snapshots/$snap" >/dev/null
         done
-      - >-
-        tar -czf "{{ backups_directory }}/{{ backup_timestamp }}/docs-bridge/state.tar.gz"
-        -C {{ docs_bridge_data_root }}/state .
-      - >-
-        set -e;
-        D="{{ backups_directory }}/{{ backup_timestamp }}/docs-bridge";
-        SRC="{{ docs_bridge_data_root }}/docs";
-        : > "$D/docs-manifest.tsv";
-        if [ -d "$SRC" ]; then
-          cd "$SRC";
-          find . -type f -printf '%P\n' | LC_ALL=C sort | while IFS= read -r f; do
-            printf '%s\t%s\t%s\n' "$(sha256sum "$f" | cut -d' ' -f1)" "$(stat -c '%s' "$f")" "$f";
-          done >> "$D/docs-manifest.tsv";
+
+        # 2. SQLite manifest (lets a restored host skip re-embedding).
+        tar -czf "$dest/state.tar.gz" -C {{ docs_bridge_data_root }}/state .
+
+        # 3. Index of the source docs (sha256<TAB>bytes<TAB>relpath) so a restored
+        #    collection can be traced back to its files. The docs are not backed up.
+        docs={{ docs_bridge_data_root }}/docs
+        if [ -d "$docs" ]; then
+          cd "$docs"
+          find . -type f | LC_ALL=C sort | while IFS= read -r f; do
+            printf '%s\t%s\t%s\n' "$(sha256sum "$f" | cut -d' ' -f1)" "$(stat -c '%s' "$f")" "${f#./}"
+          done > "$dest/docs-manifest.tsv"
         fi
 
   - application: zigbee2mqtt
