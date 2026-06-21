@@ -4,6 +4,12 @@
 # all runs add -K (--ask-become-pass).
 
 ansible_user: ananchev
+# SSH private key the backup-node container uses to ansible-connect back to vhost2
+# (containers-backup.yml injects it as /ansible/container_host_ssh.key). Reuses the
+# vault's vhost_ssh_private_key: that is the "anton@vhost" key (~/.ssh/id_ed25519_vhost),
+# the same key that already authenticates ananchev@vhost2 on the CLI. If vault's
+# vhost_ssh_private_key is NOT that key, swap to a dedicated vhost2_ssh_private_key.
+ssh_private_key: "{{ vhost_ssh_private_key }}"
 # Set inline (not only via the [fedora] group) so it applies even on direct
 # `ansible-playbook -i inventories/vhost2/hosts` runs.
 ansible_python_interpreter: /usr/bin/python3
