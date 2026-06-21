@@ -3,7 +3,9 @@ backup_definitions:
   # the Qdrant snapshot API, NOT a live tar) + the SQLite manifest. Done host-side
   # because the data lives on bind mounts and the ingest-worker is a one-shot (no
   # long-running container to exec into). Corpora are source docs, managed
-  # separately / re-ingestable (design §10).
+  # separately / re-ingestable (design §10) — we do NOT back up /data/docs, but we
+  # DO emit docs-manifest.tsv (sha256<TAB>bytes<TAB>relpath, recursive over
+  # /data/docs) so a restored index can be traced back to the exact source files.
   # Per collection: POST a snapshot -> download the .snapshot file -> DELETE it
   # from Qdrant's store. Collections are discovered live from Qdrant (so this
   # stays decoupled from the app's config, which lives in the deploy playbook);
@@ -27,6 +29,17 @@ backup_definitions:
       - >-
         tar -czf "{{ backups_directory }}/{{ backup_timestamp }}/docs-bridge/state.tar.gz"
         -C {{ docs_bridge_data_root }}/state .
+      - >-
+        set -e;
+        D="{{ backups_directory }}/{{ backup_timestamp }}/docs-bridge";
+        SRC="{{ docs_bridge_data_root }}/docs";
+        : > "$D/docs-manifest.tsv";
+        if [ -d "$SRC" ]; then
+          cd "$SRC";
+          find . -type f -printf '%P\n' | LC_ALL=C sort | while IFS= read -r f; do
+            printf '%s\t%s\t%s\n' "$(sha256sum "$f" | cut -d' ' -f1)" "$(stat -c '%s' "$f")" "$f";
+          done >> "$D/docs-manifest.tsv";
+        fi
 
   - application: zigbee2mqtt
     container: zigbee2mqtt

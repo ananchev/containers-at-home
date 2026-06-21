@@ -9,6 +9,7 @@ application_hosts:
     - unas
     - bnod
     - vhost
+    - vhost2
   energy-meters: fed
   grafana: fed
   guacamole: fed
