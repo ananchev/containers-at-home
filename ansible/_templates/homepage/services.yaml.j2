@@ -9,6 +9,13 @@
   URL resolution: href > address(+port) > host(+port) > app(+port_name).
   app: tiles resolve host via application_services[app].hosts[0] -> lan_addresses,
   and port via application_services[app].ports[port_name] (app_services.yml).
+
+  Optional per-service overrides:
+    href         full tile link (default: base_url + path)
+    widget_url   widget API target when the LAN base_url isn't reachable (e.g.
+                 the service sits behind Authelia)         -> default base_url
+    monitor_path path appended to base_url for the siteMonitor ping, for apps
+                 whose root redirects/errors (e.g. Nextcloud -> /status.php)
 #}
 {% macro host_of(svc) %}
 {%- if svc.address is defined -%}{{ svc.address }}
@@ -31,9 +38,10 @@
     {% set b = namespace(blk={'href': full_url(svc) | trim}) %}
     {% if svc.icon is defined %}{% set b.blk = b.blk | combine({'icon': svc.icon}) %}{% endif %}
     {% if svc.description is defined %}{% set b.blk = b.blk | combine({'description': svc.description}) %}{% endif %}
-    {% if svc.href is not defined and svc.monitor | default(true) %}{% set b.blk = b.blk | combine({'siteMonitor': base_url(svc) | trim}) %}{% endif %}
+    {% if svc.href is not defined and svc.monitor | default(true) %}{% set b.blk = b.blk | combine({'siteMonitor': (base_url(svc) | trim) ~ (svc.monitor_path | default(''))}) %}{% endif %}
     {% if svc.widget is defined and homepage_secrets is defined and svc.name in homepage_secrets %}
-      {% set w = {'type': svc.widget, 'url': base_url(svc) | trim} | combine(homepage_secrets[svc.name]) %}
+      {# widget_url overrides the LAN base_url when the API must be reached via a public/proxied host (e.g. behind Authelia). #}
+      {% set w = {'type': svc.widget, 'url': svc.widget_url | default(base_url(svc) | trim)} | combine(homepage_secrets[svc.name]) %}
       {% set b.blk = b.blk | combine({'widget': w}) %}
     {% endif %}
     {% set _ = entries.append({svc.name: b.blk}) %}
@@ -44,7 +52,7 @@
       {% set b = namespace(blk={'href': full_url(svc) | trim}) %}
       {% if svc.icon is defined %}{% set b.blk = b.blk | combine({'icon': svc.icon}) %}{% endif %}
       {% if svc.description is defined %}{% set b.blk = b.blk | combine({'description': svc.description}) %}{% endif %}
-      {% if svc.href is not defined and svc.monitor | default(true) %}{% set b.blk = b.blk | combine({'siteMonitor': base_url(svc) | trim}) %}{% endif %}
+      {% if svc.href is not defined and svc.monitor | default(true) %}{% set b.blk = b.blk | combine({'siteMonitor': (base_url(svc) | trim) ~ (svc.monitor_path | default(''))}) %}{% endif %}
       {% set _ = sub_entries.append({svc.name: b.blk}) %}
     {% endfor %}
     {% set _ = entries.append({sub.name: sub_entries}) %}

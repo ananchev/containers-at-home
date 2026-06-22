@@ -92,6 +92,26 @@
     php occ config:system:set maintenance_window_start --type=integer --value=1
   changed_when: false
 
+# serverinfo (shipped, enabled by default) backs the Homepage "Nextcloud" widget.
+# Its OCS API needs an NC-Token; Homepage sends it as the widget `key`. Without a
+# token the widget gets statuscode 996, then 429 once failed polls trip brute-force.
+- name: Set the serverinfo API token (Homepage dashboard widget)
+  ansible.builtin.command: >
+    docker exec -u www-data {{ application }}-app
+    php occ config:app:set serverinfo token --value={{ nextcloud_serverinfo_token }}
+  changed_when: false
+  no_log: true
+
+# Homepage polls serverinfo every few seconds; exempt that host from brute-force
+# protection so a transient failure can't throttle the widget into 429. Host is
+# derived from the catalog (homepage's host -> its LAN IP), not hardcoded.
+- name: Allowlist the Homepage host from brute-force protection
+  ansible.builtin.command: >
+    docker exec -u www-data {{ application }}-app
+    php occ config:system:set bruteforce.protection.allowlist 0
+    --value={{ lan_addresses[application_services['homepage'].hosts[0]] }}/32
+  changed_when: false
+
 # ----------------------------------------------------------------------
 # Backup SSH key for the data-dir rsync to the NAS (see
 # backup_definitions.yml -> nextcloud-app host_commands).

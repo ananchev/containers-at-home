@@ -19,7 +19,8 @@
 #
 # Vault variables required (add to group_vars/all/vault.yml):
 #   nextcloud_admin_password, nextcloud_db_password, nextcloud_redis_password,
-#   nextcloud_mcp_app_password, nextcloud_onlyoffice_jwt_secret.
+#   nextcloud_mcp_app_password, nextcloud_onlyoffice_jwt_secret,
+#   nextcloud_serverinfo_token (serverinfo NC-Token for the Homepage widget).
 # Reused from the existing vault: backup_private_key, backup_user.
 #
 # Image versions are pinned inline because app_versions.yml is vault-encrypted.
