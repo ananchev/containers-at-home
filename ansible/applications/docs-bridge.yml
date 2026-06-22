@@ -102,7 +102,7 @@
 
   tasks:
     - name: Deploy docs-bridge on its designated host
-      when: inventory_hostname in application_hosts[application]
+      when: inventory_hostname in application_services[application].hosts
       block:
 
         # Merge this host's config tuning over the contract. combine(recursive)

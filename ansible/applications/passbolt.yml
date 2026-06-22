@@ -154,7 +154,7 @@
               MYSQL_USER: "{{ passbolt_mysql_user }}"
               MYSQL_PASSWORD: "{{ passbolt_mysql_pass }}"
             published_ports:
-              - "3306:3306"
+              - "{{ application_services['passbolt'].ports.mariadb }}:3306"
 
         - name: Get details of the maria-db container
           community.docker.docker_container_info:
@@ -275,8 +275,8 @@
             image: "{{ app_versions['passbolt']['image'] }}"
             detach: true
             ports:
-            - "8082:80"
-            - "4433:443"
+            - "{{ application_services['passbolt'].ports.http }}:80"
+            - "{{ application_services['passbolt'].ports.https }}:443"
             volumes:
               - "{{ host_directory }}/jwt:/etc/passbolt/jwt:Z"
               - "{{ host_directory }}/gpg:/etc/passbolt/gpg:Z"
@@ -312,4 +312,4 @@
         #     uid: "{{ id_output.stdout | regex_search('uid=([0-9]+)', '\\1') | int }}"
         #     gid: "{{ id_output.stdout | regex_search('gid=([0-9]+)', '\\1') | int }}"
 
-      when: inventory_hostname in application_hosts['passbolt']
+      when: inventory_hostname in application_services['passbolt'].hosts

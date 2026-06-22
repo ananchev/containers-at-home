@@ -4,13 +4,13 @@ The backup system is designed to run from a single playbook (`take_backups.yml`)
 
 This is achieved by:
 
-1.  **Centralized Host Mapping**: A central variable file (`vars/application_hosts.yml`) defines which host each application is assigned to. This provides a single source of truth for application placement.
+1.  **Centralized Host Mapping**: A central variable file (`app_services.yml`) defines which host(s) each application is assigned to. This provides a single source of truth for application placement.
 
     ```yaml
-    # app_hosts.yml
-    application_hosts:
-      zigbee2mqtt: fed
-      rustdesk: unraid
+    # app_services.yml
+    application_services:
+      zigbee2mqtt: { hosts: [fed] }
+      rustdesk: { hosts: [unraid] }
       # ...
     ```
 
@@ -31,8 +31,8 @@ This is achieved by:
     - name: Backup containers
       include_tasks: backup_tasks.yml
       loop: "{{ backup_definitions }}"
-      # This condition looks up the host and compares it to the current host
-      when: application_hosts[item.application] == inventory_hostname
+      # This condition checks whether the current host runs the application
+      when: inventory_hostname in application_services[item.application].hosts
       # ...
     ```
 

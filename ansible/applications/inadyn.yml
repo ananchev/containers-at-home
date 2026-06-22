@@ -54,4 +54,4 @@
             type: bind
             read_only: yes
           restart_policy: unless-stopped
-      when: inventory_hostname in application_hosts['inadyn']
+      when: inventory_hostname in application_services['inadyn'].hosts

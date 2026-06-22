@@ -50,7 +50,7 @@
           network_mode: bridge
           image: energy-meters:latest
           ports:
-            - 5000:5000
+            - "{{ application_services['energy-meters'].ports.web }}:5000"
           mounts:
             - source: "{{ host_directory }}/readings_cache.json"
               target: /app/afvalwijzer.log
@@ -63,4 +63,4 @@
           volumes:
             - "{{ host_directory }}/applog:/app/logs:Z"
           restart_policy: unless-stopped
-      when: inventory_hostname in application_hosts['energy-meters']
+      when: inventory_hostname in application_services['energy-meters'].hosts

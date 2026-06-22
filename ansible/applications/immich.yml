@@ -100,7 +100,7 @@
           detach: true
           restart_policy: unless-stopped
           ports:
-            - "2283:2283"
+            - "{{ application_services['immich'].ports.web }}:2283"
           volumes:
             - "{{ host_directory }}/media:/data:Z"
           mounts:
@@ -125,4 +125,4 @@
         become: true
         become_user: "{{ ansible_user }}"
 
-      when: inventory_hostname in application_hosts['immich']
+      when: inventory_hostname in application_services['immich'].hosts

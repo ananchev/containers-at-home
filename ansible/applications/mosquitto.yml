@@ -51,7 +51,7 @@
           image: "{{ app_versions.mosquitto.image }}"
           detach: true
           ports:
-            - 1883:1883
+            - "{{ application_services['mosquitto'].ports.mqtt }}:1883"
           volumes:
             - "{{ host_directory }}/log:/mosquitto/log:Z"
             - "{{ host_directory }}/data:/mosquitto/data:Z"
@@ -61,4 +61,4 @@
             type: bind
             read_only: yes
           restart_policy: unless-stopped
-      when: inventory_hostname in application_hosts['mosquitto']
+      when: inventory_hostname in application_services['mosquitto'].hosts

@@ -1,0 +1,20 @@
+# LAN address map — the ONE place a host's reachable address lives for the
+# Homepage dashboard. Kept here in group_vars/all (always loaded, regardless of
+# which single-host inventory run-playbook.sh targets) for the same reason
+# backup-manager reads application_services from here instead of per-host facts:
+# hostvars[<other host>] is not populated when a playbook runs against one host.
+#
+# When a host's IP changes -> edit it here once; every dashboard tile that
+# resolves through `host:`/`app:` follows automatically.
+#
+# bnod is OFFSITE: its services are reached over Cloudflare (*.tonio.cc), so on
+# the dashboard prefer an explicit `href:` for bnod-hosted services rather than
+# resolving through this map.
+lan_addresses:
+  fed: 192.168.2.8
+  unas: 192.168.2.2
+  vhost: 192.168.2.3
+  vhost2: 192.168.2.199
+  pi5: 192.168.2.11
+  vm: 192.168.2.34
+  bnod: bg.tonio.cc

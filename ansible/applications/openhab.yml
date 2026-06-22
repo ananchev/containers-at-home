@@ -34,9 +34,9 @@
           image: "{{app_versions.openhab.image}}"
           detach: true
           ports:
-            - 1234:1234
-            - 8101:8101
-            - 8443:8443
+            - "{{ application_services['openhab'].ports.web }}:1234"
+            - "{{ application_services['openhab'].ports.console }}:8101"
+            - "{{ application_services['openhab'].ports.https }}:8443"
           volumes:
             - "{{ host_directory }}/addons:/openhab/addons:Z"
             - "{{ host_directory }}/conf:/openhab/conf:Z"
@@ -56,4 +56,4 @@
             TZ: "Europe/Amsterdam" 
             CRYPTO_POLICY: "unlimited"
             EXTRA_JAVA_OPTS: "-Duser.timezone=Europe/Amsterdam"
-      when: inventory_hostname in application_hosts['openhab']
+      when: inventory_hostname in application_services['openhab'].hosts

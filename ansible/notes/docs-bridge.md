@@ -2,7 +2,7 @@
 
 RAG stack (Qdrant + one-shot ingest-worker). One app = one playbook
 (`applications/docs-bridge.yml`); the config contract is inline in its `vars: docs_bridge`,
-per-host knobs in `host_tuning`. Hosts: `application_hosts['docs-bridge']` (pi5, vhost2).
+per-host knobs in `host_tuning`. Hosts: `application_services['docs-bridge'].hosts` (pi5, vhost2).
 
 ## Backup — derived state only
 Backs up what is expensive to recompute: **Qdrant collections** (snapshot API, consistent)
@@ -10,7 +10,7 @@ Backs up what is expensive to recompute: **Qdrant collections** (snapshot API, c
 (re-ingestable source) — but each run emits `docs-manifest.tsv` (`sha256<TAB>bytes<TAB>relpath`)
 so a restored index can be traced back to its source files.
 
-- Runs from a **co-located `backup-node`** on each host in `application_hosts['containers-backup']`
+- Runs from a **co-located `backup-node`** on each host in `application_services['containers-backup'].hosts`
   (incl. vhost2), crond **daily 03:00** → `take_backups.yml` → rsync to ZFS
   (`192.168.2.2:/mnt/zfspool/containers-backup/`). Collections are discovered live
   (`GET /collections`), so backup needs no per-collection config.

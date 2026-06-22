@@ -36,11 +36,11 @@
           image: "{{ app_versions.zigbee2mqtt.image }}"
           detach: true
           ports:
-            - 8070:8080
+            - "{{ application_services['zigbee2mqtt'].ports.web }}:8080"
           volumes:
             - "{{ host_directory }}/data:/app/data:Z"
           restart_policy: unless-stopped
           env:
             TZ: "Europe/Amsterdam"
             
-      when: inventory_hostname in application_hosts['zigbee2mqtt']
+      when: inventory_hostname in application_services['zigbee2mqtt'].hosts

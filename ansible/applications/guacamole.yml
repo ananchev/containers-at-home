@@ -132,9 +132,9 @@
             POSTGRESQL_USERNAME: guacamole_user
             POSTGRESQL_PASSWORD: "{{ guacamole_postgres_guacamole_user_pass }}"
           ports:
-            - 8188:8080
+            - "{{ application_services['guacamole'].ports.web }}:8080"
 
       - name: Cleanup any unused images
         ansible.builtin.command: 
           docker image prune -af
-      when: inventory_hostname in application_hosts['guacamole']
+      when: inventory_hostname in application_services['guacamole'].hosts

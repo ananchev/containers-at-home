@@ -5,15 +5,15 @@
   vars:
     arr_apps:
       - name: radarr
-        port: 7878
+        port: "{{ application_services['arr-stack'].ports.radarr }}"
       - name: sonarr
-        port: 8989
+        port: "{{ application_services['arr-stack'].ports.sonarr }}"
       - name: bazarr
-        port: 6767
+        port: "{{ application_services['arr-stack'].ports.bazarr }}"
 
   tasks:
     - name: Run only on the designated host
-      when: inventory_hostname in application_hosts['arr-stack']
+      when: inventory_hostname in application_services['arr-stack'].hosts
       block:
       - name: Create directory
         file:

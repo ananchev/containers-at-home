@@ -1,0 +1,55 @@
+#jinja2: trim_blocks: True, lstrip_blocks: True
+{#
+  Renders Homepage services.yaml from the central registry
+  (group_vars/all/homepage.yml). The structure is built as native data and
+  emitted with to_nice_yaml so we never hand-manage YAML indentation. Group and
+  service ORDER is preserved because both are lists; only leaf-dict keys get
+  alphabetised by the YAML dumper, which Homepage does not care about.
+
+  URL resolution: href > address(+port) > host(+port) > app(+port_name).
+  app: tiles resolve host via application_services[app].hosts[0] -> lan_addresses,
+  and port via application_services[app].ports[port_name] (app_services.yml).
+#}
+{% macro host_of(svc) %}
+{%- if svc.address is defined -%}{{ svc.address }}
+{%- elif svc.host is defined -%}{{ lan_addresses[svc.host] }}
+{%- elif svc.app is defined -%}{{ lan_addresses[application_services[svc.app].hosts[0]] }}
+{%- endif -%}
+{% endmacro %}
+{# port: a literal svc.port (devices / host: tiles) wins; an app: tile names its port via port_name. #}
+{% macro port_of(svc) %}
+{%- if svc.port is defined -%}{{ svc.port }}
+{%- elif svc.app is defined and svc.port_name is defined -%}{{ application_services[svc.app].ports[svc.port_name] }}
+{%- endif -%}
+{% endmacro %}
+{% macro base_url(svc) %}{% set p = port_of(svc) | trim %}{{ svc.scheme | default('http') }}://{{ host_of(svc) | trim }}{% if p %}:{{ p }}{% endif %}{% endmacro %}
+{% macro full_url(svc) %}{% if svc.href is defined %}{{ svc.href }}{% else %}{{ base_url(svc) | trim }}{{ svc.path | default('') }}{% endif %}{% endmacro %}
+{% set ns = namespace(groups=[]) %}
+{% for group in homepage_groups %}
+  {% set entries = [] %}
+  {% for svc in group.services | default([]) %}
+    {% set b = namespace(blk={'href': full_url(svc) | trim}) %}
+    {% if svc.icon is defined %}{% set b.blk = b.blk | combine({'icon': svc.icon}) %}{% endif %}
+    {% if svc.description is defined %}{% set b.blk = b.blk | combine({'description': svc.description}) %}{% endif %}
+    {% if svc.href is not defined and svc.monitor | default(true) %}{% set b.blk = b.blk | combine({'siteMonitor': base_url(svc) | trim}) %}{% endif %}
+    {% if svc.widget is defined and homepage_secrets is defined and svc.name in homepage_secrets %}
+      {% set w = {'type': svc.widget, 'url': base_url(svc) | trim} | combine(homepage_secrets[svc.name]) %}
+      {% set b.blk = b.blk | combine({'widget': w}) %}
+    {% endif %}
+    {% set _ = entries.append({svc.name: b.blk}) %}
+  {% endfor %}
+  {% for sub in group.subgroups | default([]) %}
+    {% set sub_entries = [] %}
+    {% for svc in sub.services %}
+      {% set b = namespace(blk={'href': full_url(svc) | trim}) %}
+      {% if svc.icon is defined %}{% set b.blk = b.blk | combine({'icon': svc.icon}) %}{% endif %}
+      {% if svc.description is defined %}{% set b.blk = b.blk | combine({'description': svc.description}) %}{% endif %}
+      {% if svc.href is not defined and svc.monitor | default(true) %}{% set b.blk = b.blk | combine({'siteMonitor': base_url(svc) | trim}) %}{% endif %}
+      {% set _ = sub_entries.append({svc.name: b.blk}) %}
+    {% endfor %}
+    {% set _ = entries.append({sub.name: sub_entries}) %}
+  {% endfor %}
+  {% set _ = ns.groups.append({group.name: entries}) %}
+{% endfor %}
+---
+{{ ns.groups | to_nice_yaml(indent=2, width=1000) }}

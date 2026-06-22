@@ -65,7 +65,7 @@
           detach: true
           image: "{{ app_versions['influx-grafana']['image'] }}"
           ports:
-            - "8086:8086"  
+            - "{{ application_services['influxdb'].ports.web }}:8086"  
           volumes:
             - "{{ host_directory }}/data:/var/lib/influxdb:Z"
             - "{{ host_directory }}/influxdb.conf:/etc/influxdb/influxdb.conf:ro"
@@ -101,4 +101,4 @@
         ansible.builtin.command: >
           docker exec -it {{ container_name }} rm -r /backup
           
-      when: inventory_hostname in application_hosts['influxdb']
+      when: inventory_hostname in application_services['influxdb'].hosts

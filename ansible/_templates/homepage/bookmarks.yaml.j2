@@ -1,0 +1,7 @@
+#jinja2: trim_blocks: True, lstrip_blocks: True
+{#
+  Bookmarks are non-derived reference links, shaped in the registry exactly as
+  Homepage expects, so we emit homepage_bookmarks verbatim.
+#}
+---
+{{ homepage_bookmarks | default([]) | to_nice_yaml(indent=2, width=1000) }}

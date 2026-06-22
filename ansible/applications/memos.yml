@@ -102,8 +102,8 @@
               read_only: yes
           command: "--driver postgres --dsn 'postgresql://memos:{{ memos_postgres_memos_user_pass }}@memos-postgres:5432/memos?sslmode=disable'"
           ports:
-          - 5230:5230
+          - "{{ application_services['memos'].ports.web }}:5230"
           env:
             TZ: "Europe/Amsterdam"
           restart_policy: unless-stopped
-      when: inventory_hostname in application_hosts['memos']
+      when: inventory_hostname in application_services['memos'].hosts

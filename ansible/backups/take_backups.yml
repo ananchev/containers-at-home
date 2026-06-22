@@ -3,9 +3,10 @@
   gather_facts: False
   vars:
   vars_files:
-    - ../vault.yml
+    # vault.yml, app_services.yml, global_vars.yml, app_versions.yml all come from
+    # group_vars auto-load (the committed inventories/<host>/group_vars symlink),
+    # same as every other playbook. Only backup_definitions.yml is local here.
     - backup_definitions.yml
-    - ../app_hosts.yml
   tasks:
 
     - name: Delete all existing backups (contents only)
@@ -33,7 +34,7 @@
       loop: "{{ backup_definitions }}"
       loop_control:
         label: "{{ item.application }}"
-      when: inventory_hostname in application_hosts.get(item.application, [])
+      when: inventory_hostname in application_services.get(item.application, {}).get('hosts', [])
     
     - name: Ensure no temporary private key to auth on the backups target host exists
       file:

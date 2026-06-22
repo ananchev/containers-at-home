@@ -298,8 +298,8 @@
                 detach: true
                 state: stopped
                 ports:
-                  - "8082:80"
-                  - "4433:443"
+                  - "{{ application_services['passbolt-recovery'].ports.http }}:80"
+                  - "{{ application_services['passbolt-recovery'].ports.https }}:443"
                 volumes:
                   - "{{ host_directory }}/jwt:/etc/passbolt/jwt"
                   - "{{ host_directory }}/gpg:/etc/passbolt/gpg"
@@ -326,4 +326,4 @@
                 command: >
                   /usr/bin/wait-for.sh -t 0 {{ recovery_mysql_container_name }}:3306 -- /docker-entrypoint.sh
 
-      when: inventory_hostname in application_hosts['passbolt-recovery']
+      when: inventory_hostname in application_services['passbolt-recovery'].hosts

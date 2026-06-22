@@ -90,7 +90,7 @@
         build:
           path: "{{ host_directory }}/cycling-coach/source"
         ports:
-          - "8088:8088/tcp"
+          - "{{ application_services['cycling-stack'].ports.coach }}:8088/tcp"
         env: "{{ env_vars.cycling_coach }}"
         volumes:
           - "{{ host_directory }}/cycling-coach/data:/data"
@@ -108,7 +108,7 @@
           path: "{{ host_directory }}/cycling-coach/source/mcp-server"
         hostname: cycling-coach-mcp-server
         ports:
-          - "8091:8091/tcp"
+          - "{{ application_services['cycling-stack'].ports.coach_mcp }}:8091/tcp"
         env: "{{ env_vars.cycling_coach_mcp_server }}"
         certs_path: "{{ host_directory }}/cycling-coach/mcp-client-certs"
         cert_files:
@@ -131,7 +131,7 @@
         build:
           path: "{{ host_directory }}/mcp-auth/source"
         ports:
-          - "8092:8092/tcp"
+          - "{{ application_services['cycling-stack'].ports.auth }}:8092/tcp"
         env: "{{ env_vars.mcp_auth_server }}"
         volumes:
           - "{{ host_directory }}/mcp-auth/data:/data"
@@ -146,7 +146,7 @@
           path: "{{ host_directory }}/healthbridge/source/backend"
           dockerfile: ../deploy/backend.Dockerfile
         ports:
-          - "8000:8000/tcp"
+          - "{{ application_services['cycling-stack'].ports.healthbridge }}:8000/tcp"
         env: "{{ env_vars.healthbridge_backend }}"
         volumes:
           - "{{ host_directory }}/healthbridge/data:/data"
@@ -157,14 +157,14 @@
           path: "{{ host_directory }}/healthbridge/source/mcp"
           dockerfile: ../deploy/mcp.Dockerfile
         ports:
-          - "8001:8001/tcp"
+          - "{{ application_services['cycling-stack'].ports.healthbridge_mcp }}:8001/tcp"
         env: "{{ env_vars.healthbridge_mcp_server }}"
         volumes:
           - "{{ host_directory }}/healthbridge/data:/data:ro"
 
   tasks:
     - name: Run only on the designated host
-      when: inventory_hostname in application_hosts[application]
+      when: inventory_hostname in application_services[application].hosts
       block:
       - name: Create stack directory
         file:

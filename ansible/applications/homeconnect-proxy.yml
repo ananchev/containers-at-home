@@ -73,7 +73,7 @@
             network_mode: bridge
             image: homeconnect-proxy:latest
             ports:
-              - "8088:8088"
+              - "{{ application_services['homeconnect-proxy'].ports.web }}:8088"
             env:
               CLIENT_ID: "{{ homeconnect_app_client_id }}"
               CLIENT_SECRET: "{{ homeconnect_app_client_secret }}"
@@ -90,4 +90,4 @@
                 type: bind
                 read_only: no 
             restart_policy: unless-stopped
-      when: inventory_hostname in application_hosts['homeconnect-proxy']
+      when: inventory_hostname in application_services['homeconnect-proxy'].hosts

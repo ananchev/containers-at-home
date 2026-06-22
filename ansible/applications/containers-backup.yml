@@ -93,4 +93,4 @@
       - name: Clean the build cache and non-tagged images
         ansible.builtin.command: docker system prune -af
 
-      when: inventory_hostname in application_hosts['containers-backup']
+      when: inventory_hostname in application_services['containers-backup'].hosts

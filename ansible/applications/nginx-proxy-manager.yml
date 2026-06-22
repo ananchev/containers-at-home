@@ -83,9 +83,9 @@
           detach: true
           image: "{{ custom_image_name }}"
           ports:
-            - "80:80"  # Public HTTP Port
-            - "443:443" # Public HTTPS Port
-            - "81:81" # Admin Web Port
+            - "{{ application_services['nginx-proxy-manager'].ports.http }}:80"  # Public HTTP Port
+            - "{{ application_services['nginx-proxy-manager'].ports.https }}:443" # Public HTTPS Port
+            - "{{ application_services['nginx-proxy-manager'].ports.web }}:81" # Admin Web Port
           volumes:
             - "{{ host_directory }}/data:/data:Z"
             - "{{ host_directory }}/letsencrypt:/etc/letsencrypt:Z"
@@ -109,4 +109,4 @@
           container: "{{ container_name }}"
           command: chmod 0600 /etc/coach-dev/npm.env
 
-      when: inventory_hostname in application_hosts['nginx-proxy-manager']
+      when: inventory_hostname in application_services['nginx-proxy-manager'].hosts

@@ -66,10 +66,10 @@
                 type: bind
                 read_only: yes
             ports:
-              - "80:80"
-              - "443:443"
+              - "{{ application_services['caddy'].ports.http }}:80"
+              - "{{ application_services['caddy'].ports.https }}:443"
             restart_policy: unless-stopped
             networks:
               - name: "{{ docker_network }}"
 
-      when: inventory_hostname in application_hosts['caddy']
+      when: inventory_hostname in application_services['caddy'].hosts

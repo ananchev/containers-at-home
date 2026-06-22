@@ -124,8 +124,8 @@
             env:
               TZ: Europe/Amsterdam
             ports:
-              - "9091:9091"
+              - "{{ application_services['authelia'].ports.web }}:9091"
             volumes:
               - "{{ host_directory }}/config:/config:Z"
             restart_policy: unless-stopped
-      when: inventory_hostname in application_hosts['authelia']
+      when: inventory_hostname in application_services['authelia'].hosts

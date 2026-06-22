@@ -102,4 +102,4 @@
               {{ end }}
               Currently running  `{{ .Entry.Metadata.current_version }}`
               {% endraw %}
-      when: inventory_hostname in application_hosts['diun']   
+      when: inventory_hostname in application_services['diun'].hosts   

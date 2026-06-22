@@ -45,7 +45,7 @@
     docker_network: "{{ application }}-net"
     local_backup_folder: "{{ application_data }}/{{ application }}"
 
-    nextcloud_http_port: 8080
+    nextcloud_http_port: "{{ application_services['nextcloud'].ports.web }}"
     nextcloud_hostname: cloud.tonio.cc
     nextcloud_lan_ip: 192.168.2.3
     # Trusted proxies: fed (NPM) + Cloudflare published ranges, so brute-force /
@@ -130,7 +130,7 @@
 
   tasks:
     - name: Run only on the designated host
-      when: inventory_hostname in application_hosts[application]
+      when: inventory_hostname in application_services[application].hosts
       block:
         # Dependency order: filesystem/restore prep -> datastores (incl. DB
         # restore) -> app + post-install -> full-text search -> OnlyOffice -> MCP.

@@ -75,7 +75,7 @@
           volumes:
             - "{{ host_directory }}:/root"
           ports:
-            - "21117:21117/tcp"
+            - "{{ application_services['rustdesk'].ports.relay }}:21117/tcp"
           networks:
             - name: "{{ docker_network }}"
           state: started
@@ -89,11 +89,11 @@
           volumes:
             - "{{ host_directory }}:/root"
           ports:
-            - "21115:21115/tcp"
-            - "21116:21116/tcp"
-            - "21116:21116/udp"
+            - "{{ application_services['rustdesk'].ports.nat }}:21115/tcp"
+            - "{{ application_services['rustdesk'].ports.hbbs }}:21116/tcp"
+            - "{{ application_services['rustdesk'].ports.hbbs }}:21116/udp"
           networks:
             - name: "{{ docker_network }}"
           state: started
           
-      when: inventory_hostname in application_hosts['rustdesk']
+      when: inventory_hostname in application_services['rustdesk'].hosts

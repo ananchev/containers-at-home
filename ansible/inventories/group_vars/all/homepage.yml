@@ -1,0 +1,113 @@
+# ============================================================================
+# Homepage dashboard — CENTRAL REGISTRY  (non-secret, version-controlled)
+# ============================================================================
+# Single source of truth for the dashboard CONTENT. The applications/homepage.yml
+# play renders it (via _templates/homepage/*.j2) into Homepage's config files.
+# Touch this file (and app_services.yml / lan_addresses.yml) — not the templates.
+#
+# Per-tile URL resolution (handled by services.yaml.j2):
+#   host:  href:              -> used verbatim (external / public *.tonio.cc)
+#          address: (+ port)  -> a literal IP/host (network gear, off-map boxes)
+#          host:    (+ port)  -> a logical host -> IP via lan_addresses[host]
+#          app:               -> application_services[app].hosts[0] -> lan_addresses
+#   port:  a literal `port:` (devices / host: tiles) wins; an app: tile instead
+#          names its port via `port_name:` -> application_services[app].ports[name]
+#
+# An app: tile carries NO port number — it names a port the catalog already
+# defines, so the number lives in exactly one place (app_services.yml). Moving an
+# app to another host = edit its hosts there; gate AND dashboard both follow.
+#
+# Optional per-tile keys: scheme (default http), path, description, icon,
+# widget (type; creds from vaulted homepage_secrets[<name>]), monitor (false to
+# suppress the up/down ping, e.g. host-local services).
+#
+# To wire a widget: add `widget:` here AND homepage_secrets[<exact name>] to
+# vault.yml. A missing secret degrades gracefully to a plain link.
+# ============================================================================
+
+homepage_title: Homelab
+
+homepage_groups:
+
+  - name: Media
+    services:
+      - { name: Jellyfin,     app: jellyfin,  port_name: web,    icon: jellyfin,    widget: jellyfin,    description: Media server }
+      - { name: Radarr,       app: arr-stack, port_name: radarr, icon: radarr,      widget: radarr,      description: Movies }
+      - { name: Sonarr,       app: arr-stack, port_name: sonarr, icon: sonarr,      widget: sonarr,      description: Series }
+      - { name: Bazarr,       app: arr-stack, port_name: bazarr, icon: bazarr,      widget: bazarr,      description: Subtitles }
+      - { name: qBittorrent,  address: 192.168.2.9, port: 8181, icon: qbittorrent, widget: qbittorrent, description: Downloads }
+
+  - name: Smart Home
+    services:
+      - { name: openHAB,           app: openhab,      port_name: web, icon: openhab,      description: Home automation }
+      - { name: Zigbee2MQTT,       app: zigbee2mqtt,  port_name: web, icon: zigbee2mqtt,  description: Zigbee bridge }
+      - { name: Energy Dashboard,  app: grafana,      port_name: web, icon: grafana, path: "/d/t8Dbcbdnk/daily-energy-use", description: Daily energy use }
+      - { name: HyperHDR,          address: 192.168.5.7, port: 8090, icon: mdi-television-ambient-light, description: Lounge TV ambilight }
+      - { name: Sonos,             href: https://play.sonos.com/en-us/web-app, icon: sonos, description: Speakers }
+
+  - name: Files & Productivity
+    services:
+      - { name: Nextcloud,   app: nextcloud, port_name: web, icon: nextcloud, widget: nextcloud, description: Files & sync }
+      - { name: Immich,      app: immich,    port_name: web, icon: immich,    widget: immich,    description: Photos }
+      - { name: Memos,       app: memos,     port_name: web, icon: memos,     description: Notes }
+      - { name: Passbolt,    href: https://passbolt.tonio.cc, icon: passbolt, description: Password manager }
+      - { name: docs-bridge, host: vhost2,   port: 8080, icon: mdi-file-search, monitor: false, description: "RAG search (host-local)" }
+
+  - name: Remote Access
+    services:
+      - { name: Guacamole,     app: guacamole, port_name: web, path: "/guacamole/", icon: guacamole, widget: guacamole, description: Remote desktops }
+      - { name: OpenVPN Admin, address: 192.168.2.6, port: 8080, icon: openvpn, description: VPN users }
+      - { name: RustDesk,      address: 192.168.2.2, icon: rustdesk, monitor: false, description: "Relay server (no web UI)" }
+
+  - name: Monitoring & Ops
+    services:
+      - { name: Grafana,             app: grafana,             port_name: web, icon: grafana,             widget: grafana, description: Dashboards }
+      - { name: InfluxDB,            app: influxdb,            port_name: web, icon: influxdb,            description: Time-series DB }
+      - { name: Nginx Proxy Manager, app: nginx-proxy-manager, port_name: web, icon: nginx-proxy-manager, widget: npm, description: Reverse proxy }
+      - { name: borg-ui,             href: https://borg.tonio.cc, icon: mdi-archive-arrow-up, description: "Offsite backups (bnod)" }
+      - { name: HetrixTools,         href: https://hetrixtools.com/dashboard/, icon: mdi-radar, description: Uptime monitoring }
+
+  - name: Infrastructure / Hosts
+    services:
+      - { name: Cockpit (vhost),  address: 192.168.2.3,   port: 9090, scheme: https, icon: cockpit, description: Host management }
+      - { name: Cockpit (vhost2), address: 192.168.2.199, port: 9090, scheme: https, icon: cockpit, description: Host management }
+      - { name: Unraid (unas),    address: 192.168.2.2,   path: "/Dashboard", icon: unraid, description: NAS }
+
+  - name: Network
+    services:
+      - { name: edge NL,        address: 192.168.2.254, scheme: https, icon: ubiquiti, description: EdgeRouter }
+      - { name: edge3,          address: 192.168.2.200, scheme: https, icon: ubiquiti, description: EdgeRouter }
+      - { name: AdGuard Home,   address: 192.168.2.254, port: 8080, icon: adguard-home, widget: adguard, description: DNS / ad-blocking }
+      - { name: DHCP Leases,    address: 192.168.2.254, port: 8181, path: "/static/", icon: mdi-ip-network, description: Lease manager }
+      - { name: DAWN,           address: 192.168.2.207, path: "/dawn.html", icon: mdi-wifi-star, description: WiFi roaming }
+      - { name: tom1 (ground),  address: 192.168.5.254, icon: openwrt, description: AP }
+      - { name: tom2 (second),  address: 192.168.5.253, icon: openwrt, description: AP }
+      - { name: owrt (bedroom), address: 192.168.5.252, path: "/cgi-bin/luci/", icon: openwrt, description: AP }
+      - { name: owrt2 (entrance), address: 192.168.5.251, path: "/cgi-bin/luci/", icon: openwrt, description: AP }
+      - { name: owrt1 (attic),  address: 192.168.2.207, path: "/cgi-bin/luci/", icon: openwrt, description: AP }
+      - { name: owrt3,          address: 192.168.2.3, port: 8081, path: "/cgi-bin/luci/", icon: openwrt, description: "AP (via reverse ssh)" }
+      - { name: Reolink camera, address: 192.168.5.31, scheme: https, icon: mdi-cctv, description: Camera }
+      - { name: Modbus gateway, address: 192.168.5.100, icon: mdi-lan, description: Energy meters }
+      - { name: Zigbee gateway, address: 192.168.5.101, icon: mdi-zigbee, description: Ethernet bridge }
+      - { name: Ricoh printer,  address: 192.168.5.220, path: "/main.asp?Lang=en-us", icon: mdi-printer, description: P C300W }
+    subgroups:
+      - name: BG (offsite)
+        services:
+          - { name: edge BG,        address: 192.168.111.254, scheme: https, icon: ubiquiti, description: EdgeRouter }
+          - { name: DD-WRT AP,      address: 192.168.111.1, icon: mdi-router-wireless, description: Access point }
+          - { name: edge BG (VPN),  address: 10.8.0.2, scheme: https, icon: ubiquiti, description: Via OpenVPN }
+
+# --- Bookmarks (curated reference links) — rendered verbatim to bookmarks.yaml -
+homepage_bookmarks:
+  - Admin & SaaS:
+      - Cloudflare:
+          - { abbr: CF, href: https://dash.cloudflare.com/ }
+      - Zoho Mail Admin:
+          - { abbr: ZM, href: https://mailadmin.zoho.eu/cpanel/home.do }
+  - Tools:
+      - CyberChef:
+          - { abbr: CC, href: https://gchq.github.io/CyberChef/ }
+      - HetrixTools:
+          - { abbr: HX, href: https://hetrixtools.com/dashboard/ }
+      - Glances Docs:
+          - { abbr: GL, href: https://glances.readthedocs.io/ }

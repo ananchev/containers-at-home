@@ -1,0 +1,21 @@
+#jinja2: trim_blocks: True, lstrip_blocks: True
+---
+title: {{ homepage_title | default('Homelab') }}
+theme: dark
+color: slate
+headerStyle: clean
+hideVersion: true
+statusStyle: dot
+# Layout order is derived from the registry, so a new group/subgroup appears
+# automatically without touching this template.
+layout:
+{% for group in homepage_groups %}
+  {{ group.name }}:
+    style: row
+    columns: 4
+  {% for sub in group.subgroups | default([]) %}
+  {{ sub.name }}:
+    style: row
+    columns: 4
+  {% endfor %}
+{% endfor %}

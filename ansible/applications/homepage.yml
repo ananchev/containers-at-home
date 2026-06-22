@@ -1,0 +1,113 @@
+---
+# Homepage — declarative homelab dashboard (gethomepage.dev).
+#
+# The dashboard CONTENT lives in the central registry:
+#   * group_vars/all/homepage.yml      -> groups, services, bookmarks
+#   * group_vars/all/lan_addresses.yml -> host -> LAN IP map
+#   * vault.yml: homepage_secrets.<svc> -> widget API keys / credentials
+# This play only renders that registry into Homepage's config files (via
+# _templates/homepage/*.j2) and runs the container — mirroring the
+# backup-manager pattern of "one central declaration, the template derives the
+# rest". Routine changes never touch this playbook or the templates.
+#
+# Maintenance (NO redeploy of any other app — Homepage only READS their config):
+#   * add / move / regroup a service -> group_vars/all/homepage.yml
+#   * a service changes host          -> app_services.yml (app: mode) or its host:
+#   * a host's IP changes             -> group_vars/all/lan_addresses.yml
+#   * wire a widget                   -> add homepage_secrets.<svc> to vault.yml
+#   * add a web bookmark              -> edit bookmarks.yaml live on the host (no
+#                                        redeploy); the registry only SEEDS it
+#
+# Backups: only bookmarks.yaml. services/settings/widgets are regenerated from
+# the registry on every run (stateless). bookmarks.yaml is host-owned — seeded
+# once, then hand-edited live (Homepage hot-reloads it) — so it is captured by
+# backup_definitions.yml (homepage entry) into the ZFS+borg pipeline and, on a
+# fresh deploy, restored from the staged copy in application_data/homepage/.
+#
+# Public exposure: NPM on fed proxies home.tonio.cc -> {{ fed }}:{{ host_port }}
+# behind Cloudflare Access mTLS (same model as the other public hosts). The NPM
+# proxy host is configured once in the NPM UI; it is not managed here.
+#
+#   ./run-playbook.sh fed homepage ~/.ssh/<key>
+- hosts: homelab
+  become: true
+  gather_facts: false
+  vars:
+    application: homepage
+    container_name: "{{ application }}"
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    config_directory: "{{ host_directory }}/config"
+    staged_bookmarks: "{{ application_data }}/{{ application }}/bookmarks.yaml"   # restore source on the control node
+    host_port: "{{ application_services[application].ports.web }}"   # 3010 (3000 = Grafana on fed)
+    public_host: home.tonio.cc
+    # Pinned via the vaulted app_versions.yml (add a `homepage` entry there so
+    # diun watches it); falls back to latest if the entry is absent.
+    homepage_image: "{{ app_versions[application].image if (app_versions[application] is defined) else 'ghcr.io/gethomepage/homepage:latest' }}"
+
+  tasks:
+    - name: Deploy Homepage on its designated host
+      when: inventory_hostname in application_services[application].hosts
+      block:
+
+        - name: Create the config directory
+          ansible.builtin.file:
+            path: "{{ config_directory }}"
+            state: directory
+            mode: '0755'
+
+        - name: Render the managed Homepage config from the central registry
+          ansible.builtin.template:
+            src: "../_templates/homepage/{{ item }}.j2"
+            dest: "{{ config_directory }}/{{ item }}"
+            mode: '0644'
+          loop:
+            - settings.yaml
+            - services.yaml
+            - widgets.yaml
+          notify: Restart homepage
+
+        # bookmarks.yaml is host-owned: hand-edited live on the host (Homepage
+        # hot-reloads it) and backed up via backup_definitions. force: no makes
+        # both tasks create-only, so a redeploy never clobbers an edited file.
+        # Prefer a staged backup (like caddy's restore); else seed the registry.
+        - name: Restore bookmarks.yaml from the staged backup, if one exists
+          ansible.builtin.copy:
+            src: "{{ staged_bookmarks }}"
+            dest: "{{ config_directory }}/bookmarks.yaml"
+            force: no
+            mode: '0644'
+          when: staged_bookmarks is exists
+
+        - name: Seed bookmarks.yaml from the registry on first deploy
+          ansible.builtin.template:
+            src: ../_templates/homepage/bookmarks.yaml.j2
+            dest: "{{ config_directory }}/bookmarks.yaml"
+            force: no
+            mode: '0644'
+
+        - name: Run the Homepage container
+          community.docker.docker_container:
+            name: "{{ container_name }}"
+            image: "{{ homepage_image }}"
+            detach: true
+            restart_policy: unless-stopped
+            ports:
+              - "{{ host_port }}:3000"
+            env:
+              # Homepage rejects requests whose Host header is not allow-listed.
+              HOMEPAGE_ALLOWED_HOSTS: "{{ public_host }},{{ lan_addresses[inventory_hostname] }}:{{ host_port }},localhost:{{ host_port }}"
+              TZ: "Europe/Amsterdam"
+            volumes:
+              - "{{ config_directory }}:/app/config:Z"
+            mounts:
+              - source: /etc/localtime
+                target: /etc/localtime
+                type: bind
+                read_only: yes
+
+  handlers:
+    - name: Restart homepage
+      community.docker.docker_container:
+        name: "{{ container_name }}"
+        state: started
+        restart: true

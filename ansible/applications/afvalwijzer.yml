@@ -74,4 +74,4 @@
                 type: bind
                 read_only: yes
             restart_policy: unless-stopped
-      when: inventory_hostname in application_hosts['afvalwijzer']
+      when: inventory_hostname in application_services['afvalwijzer'].hosts

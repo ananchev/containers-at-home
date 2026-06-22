@@ -73,7 +73,7 @@
           unraid_daily_retention: "{{ script_vars.unraid_daily_retention }}"
           unraid_weekly_retention: "{{ script_vars.unraid_weekly_retention }}"
           unraid_monthly_retention: "{{ script_vars.unraid_monthly_retention }}"
-          all_backup_nodes: "{{ application_hosts['containers-backup'] | join(' ') }}"
+          all_backup_nodes: "{{ application_services['containers-backup'].hosts | join(' ') }}"
       
       - name: Write borg SSH key into the build directory
         ansible.builtin.copy:
@@ -135,4 +135,4 @@
       - name: Clean the build cache and non-tagged images
         ansible.builtin.command: docker system prune -af
 
-      when: inventory_hostname in application_hosts['backup-manager']
+      when: inventory_hostname in application_services['backup-manager'].hosts

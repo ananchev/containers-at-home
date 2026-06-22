@@ -104,4 +104,4 @@
           register: sqlite_result
           failed_when: sqlite_result.rc != 0
 
-      when: inventory_hostname in application_hosts['borg-ui']
+      when: inventory_hostname in application_services['borg-ui'].hosts

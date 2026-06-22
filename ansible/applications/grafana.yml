@@ -53,10 +53,10 @@
           detach: true
           user: "1001:"
           ports:
-            - 3000:3000
+            - "{{ application_services['grafana'].ports.web }}:3000"
           volumes:
             - "{{ host_directory }}/data:/var/lib/grafana:Z"
           restart_policy: unless-stopped
           env:
             GF_INSTALL_PLUGINS: "marcusolsson-dynamictext-panel"
-      when: inventory_hostname in application_hosts['grafana']
+      when: inventory_hostname in application_services['grafana'].hosts
