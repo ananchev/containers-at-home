@@ -86,6 +86,31 @@
     - name: Apply storage relocation now (restart socket if it changed)
       ansible.builtin.meta: flush_handlers
 
+    # On a firewalld host (RHEL family) netavark leaves each container bridge in
+    # the default zone (public), which DROPS the container->gateway :53 packets to
+    # aardvark-dns. Container name resolution then fails with "Temporary failure in
+    # name resolution" (EAI_AGAIN) even though aardvark holds the right records.
+    # Trust Podman's container subnets so DNS (and inter-container traffic) flows:
+    # 10.88.0.0/16 is the default network, 10.89.0.0/16 the pool for user-defined
+    # networks. Runs at provisioning before any app network exists, so the reload
+    # below cannot flush live netavark rules.
+    - name: Detect whether firewalld is running
+      ansible.builtin.command: firewall-cmd --state
+      register: firewalld_state
+      changed_when: false
+      failed_when: false
+
+    - name: Trust Podman container subnets in firewalld (container DNS via aardvark-dns)
+      when: firewalld_state.stdout == "running"
+      ansible.builtin.command:
+        cmd: "firewall-cmd --permanent --zone=trusted --add-source={{ item }}"
+      register: fw_trust
+      changed_when: "'ALREADY_ENABLED' not in (fw_trust.stderr | default('')) and 'ALREADY_ENABLED' not in (fw_trust.stdout | default(''))"
+      loop:
+        - 10.88.0.0/16
+        - 10.89.0.0/16
+      notify: reload firewalld
+
     - name: Enable podman-restart (restores unless-stopped containers on boot)
       ansible.builtin.systemd:
         name: podman-restart.service
@@ -106,3 +131,7 @@
       ansible.builtin.systemd:
         name: podman.socket
         state: restarted
+
+    - name: reload firewalld
+      ansible.builtin.command: firewall-cmd --reload
+      changed_when: true

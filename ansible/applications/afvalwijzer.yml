@@ -61,7 +61,7 @@
             image: afvalwijzer:latest
             env:
               URL: "{{ afvalwijzer_query_url }}"
-              MQTT_SERVER: "192.168.2.8"
+              MQTT_SERVER: "{{ lan_addresses[application_services['mosquitto'].hosts[0]] }}"
               MQTT_TOPIC: garbage_collection
               TZ: Europe/Amsterdam
             mounts:

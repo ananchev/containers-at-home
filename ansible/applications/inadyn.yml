@@ -27,7 +27,7 @@
             provider cloudflare.com {
                 username = {{ inadyn_cloudflare_token_username }}  
                 password = {{ inadyn_cloudflare_token_password }} #Api token with permissions: Zone.Zone - Read, Zone.DNS - Edit.
-                hostname = {{ inadyn_cloudflare_hostname }} 
+                hostname = { {% for h in inadyn_cloudflare_hostname %}"{{ h }}"{{ ", " if not loop.last else "" }}{% endfor %} }
                 ttl = 1 # optional, value of 1 is 'automatic'.
                 proxied = true # optional.
             }

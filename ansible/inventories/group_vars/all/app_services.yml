@@ -7,48 +7,48 @@
 #   * the Homepage dashboard:       host via .hosts[0] -> lan_addresses,
 #                                   port via .ports[<name>]
 #
-# Shape (uniform, so there are no special cases):
+# Shape (uniform, no special cases):
 #   <app>:
 #     hosts: [<host>, ...]            # always a list, even for one host
 #     ports: { <name>: <host-port> }  # host-published ports, by name; optional
 #
-# `hosts` is normalised to a list so the gate is always `... in ....hosts`.
+# `hosts` is a list so the gate where to deploy can use `... in ....hosts` for any number of hosts.
 # `ports` keys are human labels (web, http, mqtt, ...) referenced by both the
 # playbook and the dashboard, so a host port number is written exactly once.
-# The CONTAINER-internal port stays literal in the playbook (it is an image
+# The CONTAINER-internal port stays in the playbook (it is an image
 # fact, e.g. "...ports.web }}:8080"). Use underscores in port names, never
 # hyphens, so Jinja dot-access (.coach_mcp) works. Apps with no host-published
 # port omit `ports`.
 #
 # Moving an app to another host = edit its `hosts` here; the gate and the
-# dashboard both follow. (lan_addresses.yml maps host -> reachable IP.)
+# dashboard both follow. (lan_addresses.yml maps host to  IP in case of e.g. new router or host)
 # ============================================================================
 application_services:
-  afvalwijzer:         { hosts: [fed] }
+  afvalwijzer:         { hosts: [pi5] }
   arr-stack:           { hosts: [unas], ports: { radarr: 7878, sonarr: 8989, bazarr: 6767 } }
-  authelia:            { hosts: [fed], ports: { web: 9091 } }
+  authelia:            { hosts: [pi5], ports: { web: 9091 } }
   backup-manager:      { hosts: [unas, vm] }
   borg-ui:             { hosts: [bnod] }                 # no host port; reached via caddy on bnod
   caddy:               { hosts: [bnod], ports: { http: 80, https: 443 } }
-  containers-backup:   { hosts: [fed, unas, bnod, vhost, vhost2] }
+  containers-backup:   { hosts: [pi5, unas, bnod, vhost, vhost2] }
   cycling-stack:       { hosts: [unas], ports: { coach: 8088, coach_mcp: 8091, auth: 8092, healthbridge: 8000, healthbridge_mcp: 8001 } }
-  diun:                { hosts: [fed] }
-  docs-bridge:         { hosts: [pi5, vhost2] }
-  energy-meters:       { hosts: [fed], ports: { web: 5000 } }
-  grafana:             { hosts: [fed], ports: { web: 3000 } }
-  guacamole:           { hosts: [fed], ports: { web: 8188 } }
-  homeconnect-proxy:   { hosts: [fed], ports: { web: 8088 } }
-  homepage:            { hosts: [fed], ports: { web: 3010 } }
+  diun:                { hosts: [unas] }
+  docs-bridge:         { hosts: [vhost2] }
+  energy-meters:       { hosts: [pi5], ports: { web: 5000 } }
+  grafana:             { hosts: [pi5], ports: { web: 3000 } }
+  guacamole:           { hosts: [pi5], ports: { web: 8188 } }
+  homeconnect-proxy:   { hosts: [pi5], ports: { web: 8088 } }
+  homepage:            { hosts: [pi5], ports: { web: 3010 } }
   immich:              { hosts: [vhost], ports: { web: 2283 } }
-  inadyn:              { hosts: [fed] }
-  influxdb:            { hosts: [fed], ports: { web: 8086 } }
+  inadyn:              { hosts: [pi5] }
+  influxdb:            { hosts: [pi5], ports: { web: 8086 } }
   jellyfin:            { hosts: [unas], ports: { web: 8096, discovery: 7359 } }
   memos:               { hosts: [unas], ports: { web: 5230 } }
-  mosquitto:           { hosts: [fed], ports: { mqtt: 1883 } }
+  mosquitto:           { hosts: [pi5], ports: { mqtt: 1883 } }
   nextcloud:           { hosts: [vhost], ports: { web: 8080 } }
-  nginx-proxy-manager: { hosts: [fed], ports: { web: 81, http: 80, https: 443 } }
-  openhab:             { hosts: [fed], ports: { web: 1234, console: 8101, https: 8443 } }
-  passbolt:            { hosts: [fed], ports: { mariadb: 3306, http: 8082, https: 4433 } }
+  nginx-proxy-manager: { hosts: [pi5], ports: { web: 81, http: 80, https: 443 } }
+  openhab:             { hosts: [pi5], ports: { web: 1234, console: 8101, https: 8443 } }
+  passbolt:            { hosts: [pi5], ports: { mariadb: 3306, http: 8082, https: 4433 } }
   passbolt-recovery:   { hosts: [bnod], ports: { http: 8082, https: 4433 } }
   rustdesk:            { hosts: [unas], ports: { relay: 21117, nat: 21115, hbbs: 21116 } }
-  zigbee2mqtt:         { hosts: [fed], ports: { web: 8070 } }
+  zigbee2mqtt:         { hosts: [pi5], ports: { web: 8070 } }

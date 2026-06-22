@@ -2,6 +2,7 @@
 # SSH key is supplied on the run-playbook.sh CLI (~/.ssh/id_ed25519_pi5).
 
 ansible_user: ananchev
+ssh_private_key: "{{ pi5_ssh_private_key }}"
 # Set here (not only in group_vars/rocky.yml) so it applies even on direct
 # `ansible-playbook -i inventories/pi5/hosts` runs, before run-playbook.sh has
 # created the group_vars symlink.
