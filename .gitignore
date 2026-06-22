@@ -17,3 +17,4 @@ config.ign
 *ed25519_key*
 *rsa_key*
 *dsa_key*
+application_data/

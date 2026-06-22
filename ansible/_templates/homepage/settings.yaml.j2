@@ -6,16 +6,20 @@ color: slate
 headerStyle: clean
 hideVersion: true
 statusStyle: dot
+# Keep groups stacked in one board column (no side-by-side reflow).
+maxGroupColumns: 1
 # Layout order is derived from the registry, so a new group/subgroup appears
-# automatically without touching this template.
+# automatically without touching this template. Per group, `columns` sets how
+# many tiles sit per row (default 3); a group can override with `columns:` (and
+# `style:`) in homepage.yml — e.g. a sparse group at columns: 1 or a big one at 4.
 layout:
 {% for group in homepage_groups %}
   {{ group.name }}:
-    style: row
-    columns: 4
+    style: {{ group.style | default('row') }}
+    columns: {{ group.columns | default(3) }}
   {% for sub in group.subgroups | default([]) %}
   {{ sub.name }}:
-    style: row
-    columns: 4
+    style: {{ sub.style | default('row') }}
+    columns: {{ sub.columns | default(3) }}
   {% endfor %}
 {% endfor %}
