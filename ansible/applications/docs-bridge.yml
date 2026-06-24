@@ -5,16 +5,15 @@
 #
 # Build context: cloned from the product repo github.com/ananchev/docs-bridge. Both
 # images build from the repo ROOT (the docs_bridge package + tools/ are shared);
-# the server image bakes the INT8 bge-m3 + bge-reranker models, so — like the
-# ingest-worker — it CANNOT build on the 8GB Pi (quantize OOMs). Build both on the
-# M2 and pre-load on the Pi; the build tasks have no force_source, so they SKIP when
-# the image is present and the deploy proceeds straight to the containers.
+# the server image bakes the INT8 bge-m3 + bge-reranker models at build time via the
+# exporter stage. Build tasks have no force_source, so they SKIP when the image is
+# already present (e.g. after a manual docker load).
 # Runtime: Podman via its Docker-API socket (pre-requisites-podman.yml).
 # Image pin: app_versions['docs-bridge-qdrant'].image (vaulted app_versions.yml).
 # Secret:    docs_bridge_secrets.bearer_token (vault) -> server's DOCS_BRIDGE_TOKEN.
 #
-#   ./run-playbook.sh pi5 docs-bridge ~/.ssh/id_ed25519_pi5
-#   ./run-playbook.sh pi5 docs-bridge ~/.ssh/id_ed25519_pi5 -e run_sync=true   # + ingest
+#   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K
+#   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e run_sync=true   # + ingest
 - hosts: homelab
   become: true
   gather_facts: false
@@ -70,7 +69,11 @@
         model_dir: /opt/bge-reranker-onnx
         int8: true
         max_length: 512
-        top_n: 30
+        # 40 (not 30) is recall-complete on the validated query set: it's the only
+        # setting that catches diffuse queries' tied 2nd-best chunk (e.g. T4X-email at
+        # RRF rank 40). ~10.8s warm (rerank is ~270ms/candidate). top_n was measured,
+        # not guessed: 16 lost answers, dense-only/union/ES all tested worse than RRF.
+        top_n: 40
       server:
         port: 8080
         default_k: 6
@@ -89,11 +92,6 @@
     #   cargo_build_jobs -> qdrant from-source build parallelism (host capacity;
     #                       gather_facts is off, so it can't be derived)
     host_tuning:
-      pi5:                                    # Raspberry Pi 5 (8GB)
-        cargo_build_jobs: "2"
-        config:
-          ingest: { batch_size: 8 }
-          qdrant: { on_disk_vectors: false, quantization: none }
       vhost2:                                 # Mac mini M2 (16GB) — production profile
         cargo_build_jobs: "8"
         config:
@@ -154,7 +152,7 @@
         # docker_image build over Podman's compat API (design §3 / deployment-
         # boundary memory). Context = repo ROOT (shared docs_bridge package),
         # Dockerfile under images/. No force_source -> SKIPS when the image is
-        # present, so the Pi runs a pre-loaded image instead of building (it can't).
+        # already present (e.g. after a manual docker load on a constrained host).
         - name: Build the ingest-worker image
           community.docker.docker_image:
             name: ingest-worker:latest
@@ -173,11 +171,11 @@
               dockerfile: images/docs-bridge/Dockerfile
               rm: true
 
-        # From-source build (jemalloc for 16K pages). Long compile on the Pi
-        # (~30-60min, thin LTO + 2 jobs to fit 8GB); only rebuilds when the image
-        # is absent, so redeploys skip it. Bumping the version in app_versions
-        # changes the tag -> next deploy rebuilds. Tagged as the upstream ref so
-        # diun watches qdrant/qdrant for new releases.
+        # From-source build (jemalloc for 16K pages — both the M2 and other
+        # aarch64 hosts need this). Only rebuilds when the image is absent, so
+        # redeploys skip it. Bumping the version in app_versions changes the tag ->
+        # next deploy rebuilds. Tagged as the upstream ref so diun watches
+        # qdrant/qdrant for new releases.
         - name: Build the qdrant image (16K-page jemalloc, version from app_versions)
           community.docker.docker_image:
             name: "{{ qdrant_image }}"

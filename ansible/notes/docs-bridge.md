@@ -2,7 +2,7 @@
 
 RAG stack (Qdrant + one-shot ingest-worker). One app = one playbook
 (`applications/docs-bridge.yml`); the config contract is inline in its `vars: docs_bridge`,
-per-host knobs in `host_tuning`. Hosts: `application_services['docs-bridge'].hosts` (pi5, vhost2).
+per-host knobs in `host_tuning`. Host: `application_services['docs-bridge'].hosts` (vhost2).
 
 ## Backup — derived state only
 Backs up what is expensive to recompute: **Qdrant collections** (snapshot API, consistent)
