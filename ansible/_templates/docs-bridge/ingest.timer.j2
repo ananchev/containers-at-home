@@ -1,0 +1,13 @@
+# Managed by ansible (applications/docs-bridge.yml) — do not edit on the host.
+[Unit]
+Description=Run the docs-bridge incremental ingest on a schedule
+
+[Timer]
+OnCalendar={{ docs_bridge_ingest_oncalendar }}
+# Run on boot if the host was down at the scheduled time.
+Persistent=true
+# Jitter so it doesn't fire at an exact wall-clock second.
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

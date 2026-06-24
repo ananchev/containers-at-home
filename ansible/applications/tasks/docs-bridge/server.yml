@@ -1,0 +1,21 @@
+---
+# docs-bridge server (MCP + REST), design §9/§15. Holds the baked INT8 bge-m3 (query
+# embed) + bge-reranker; talks to qdrant over the network (lazy-connect, so no startup
+# ordering dependency). Only mounts the rendered config + a writable cache dir (models
+# are baked, not mounted). Published host-local (LibreChat reaches it over the network).
+
+- name: Run the docs-bridge server
+  community.docker.docker_container:
+    name: "{{ application }}"
+    image: "{{ server_image }}"
+    network_mode: "{{ docker_network }}"
+    env:
+      DOCS_BRIDGE_CONFIG: /config/config.yaml
+      DOCS_BRIDGE_TOKEN: "{{ docs_bridge_secrets.bearer_token }}"
+    ports:
+      - "127.0.0.1:{{ docs_bridge.server.port }}:{{ docs_bridge.server.port }}"
+    volumes:
+      - "{{ config_file }}:/config/config.yaml:ro,z"
+      - "{{ data_root }}/cache:/data/cache:z"
+    restart_policy: unless-stopped
+    detach: true

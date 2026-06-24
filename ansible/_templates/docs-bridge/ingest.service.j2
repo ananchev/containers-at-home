@@ -1,0 +1,22 @@
+# Managed by ansible (applications/docs-bridge.yml) — do not edit on the host.
+# Daily incremental ingest: a one-shot run of the ingest-worker CLI against the live
+# corpus (hash-delta, so cheap when nothing changed). Logs to journald.
+[Unit]
+Description=docs-bridge incremental ingest (Docling -> BGE-M3 -> Qdrant)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Same invocation as the playbook's on-demand ingest, via podman directly (no reliance
+# on the docker shim being on systemd's minimal PATH). Only the subdirs the worker
+# needs are mounted (each :z relabels fine; never relabel the whole /data root).
+ExecStart=/usr/bin/{{ container_runtime }} run --rm \
+  --network {{ docker_network }} \
+  -v {{ data_root }}/docs:{{ container_data_root }}/docs:ro,z \
+  -v {{ data_root }}/state:{{ container_data_root }}/state:z \
+  -v {{ data_root }}/cache:{{ container_data_root }}/cache:z \
+  -v {{ config_file }}:/config/config.yaml:ro,z \
+  ingest-worker:latest sync --subject all --verbose
+# Ingestion of a large delta can run long; don't let systemd kill it.
+TimeoutStartSec=0

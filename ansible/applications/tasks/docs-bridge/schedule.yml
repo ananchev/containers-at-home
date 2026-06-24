@@ -1,0 +1,21 @@
+---
+# Daily incremental ingest, scheduled on the host. The ingest-worker is a one-shot CLI,
+# so a systemd timer fires the same `<runtime> run --rm ... sync` as the on-demand task;
+# logs to journald (journalctl -u docs-bridge-ingest). Persistent=true catches missed
+# runs after downtime; Type=oneshot => no overlap.
+
+- name: Install the docs-bridge ingest systemd units
+  ansible.builtin.template:
+    src: "{{ templates_dir }}/docs-bridge/{{ item.src }}"
+    dest: "/etc/systemd/system/{{ item.dest }}"
+    mode: '0644'
+  loop:
+    - { src: ingest.service.j2, dest: docs-bridge-ingest.service }
+    - { src: ingest.timer.j2,   dest: docs-bridge-ingest.timer }
+
+- name: Enable + start the daily ingest timer
+  ansible.builtin.systemd_service:
+    name: docs-bridge-ingest.timer
+    enabled: true
+    state: started
+    daemon_reload: true

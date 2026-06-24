@@ -1,0 +1,47 @@
+---
+# Build the three from-source images. No force_source -> each SKIPS when already
+# present (e.g. after a manual docker load on a constrained host). Context = repo ROOT
+# for the two app images (shared docs_bridge package); Dockerfiles under images/.
+
+- name: Build the ingest-worker image
+  community.docker.docker_image:
+    name: ingest-worker:latest
+    source: build
+    build:
+      path: "{{ source_path }}"
+      dockerfile: images/ingest-worker/Dockerfile
+      rm: true
+
+- name: Build the docs-bridge server image
+  community.docker.docker_image:
+    name: "{{ server_image }}"
+    source: build
+    build:
+      path: "{{ source_path }}"
+      dockerfile: images/docs-bridge/Dockerfile
+      rm: true
+
+# From-source build (jemalloc for 16K pages — both the M2 and other aarch64 hosts need
+# this). Only rebuilds when the image is absent, so redeploys skip it. Bumping the
+# version in app_versions changes the tag -> next deploy rebuilds. Tagged as the
+# upstream ref so diun watches qdrant/qdrant for new releases.
+- name: Build the qdrant image (16K-page jemalloc, version from app_versions)
+  community.docker.docker_image:
+    name: "{{ qdrant_image }}"
+    source: build
+    build:
+      path: "{{ source_path }}/images/qdrant"
+      args:
+        QDRANT_VERSION: "{{ qdrant_version }}"
+        CARGO_BUILD_JOBS: "{{ host_tuning[inventory_hostname].cargo_build_jobs }}"
+      rm: true
+
+# Reclaim space: drop the multi-stage builder layers (the Rust target is several GB)
+# and any leftover build containers.
+- name: Prune dangling build images
+  ansible.builtin.command: docker image prune -f
+  changed_when: true
+
+- name: Prune leftover build containers
+  ansible.builtin.command: docker container prune -f
+  changed_when: false

@@ -33,7 +33,7 @@ application_services:
   containers-backup:   { hosts: [pi5, unas, bnod, vhost, vhost2] }
   cycling-stack:       { hosts: [unas], ports: { coach: 8088, coach_mcp: 8091, auth: 8092, healthbridge: 8000, healthbridge_mcp: 8001 } }
   diun:                { hosts: [unas] }
-  docs-bridge:         { hosts: [vhost2] }
+  docs-bridge:         { hosts: [vhost2], ports: { librechat: 3080 } }   # stack: qdrant+server+librechat
   energy-meters:       { hosts: [pi5], ports: { web: 5000 } }
   grafana:             { hosts: [pi5], ports: { web: 3000 } }
   guacamole:           { hosts: [pi5], ports: { web: 8188 } }

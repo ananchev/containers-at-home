@@ -1,0 +1,70 @@
+---
+# Restore-on-fresh-deploy via the Qdrant snapshot API + the SQLite manifest. Needs a
+# live Qdrant (qdrant.yml runs first). Per collection:
+#   snapshot absent                       -> do nothing
+#   snapshot staged + collection missing  -> recover it
+#   collection already present (redeploy) -> leave it alone
+# Archives are staged on the control node at application_data/docs-bridge/. The
+# fileglob lookup runs on the controller (no delegate_to: localhost, which can hang
+# under a become: true play); copy/unarchive read their src from the controller. An
+# empty/absent application_data dir -> staged_files == [] -> every restore is skipped.
+
+- name: Discover staged restore archives on the control node
+  ansible.builtin.set_fact:
+    staged_files: "{{ lookup('ansible.builtin.fileglob', application_data ~ '/' ~ application ~ '/*', wantlist=true) | map('basename') | list }}"
+
+- name: Check which collections already exist in Qdrant
+  ansible.builtin.uri:
+    url: "{{ qdrant_api }}/collections/{{ item.collection }}"
+    status_code: [200, 404]
+  register: coll_check
+  loop: "{{ docs_bridge.subjects }}"
+  loop_control:
+    label: "{{ item.collection }}"
+
+- name: Stage snapshots on the host for collections needing restore
+  ansible.builtin.copy:
+    src: "{{ application_data }}/{{ application }}/{{ item.0.collection }}.snapshot"
+    dest: "/tmp/{{ item.0.collection }}.snapshot"
+    mode: '0644'
+  when:
+    - (item.0.collection ~ '.snapshot') in staged_files   # snapshot staged
+    - item.1.status == 404                                # collection absent
+  loop: "{{ docs_bridge.subjects | zip(coll_check.results) | list }}"
+  loop_control:
+    label: "{{ item.0.collection }}"
+
+- name: Recover collections from uploaded snapshots
+  ansible.builtin.command: >
+    curl -sf -X POST
+    "{{ qdrant_api }}/collections/{{ item.0.collection }}/snapshots/upload?priority=snapshot"
+    -F "snapshot=@/tmp/{{ item.0.collection }}.snapshot"
+  when:
+    - (item.0.collection ~ '.snapshot') in staged_files
+    - item.1.status == 404
+  loop: "{{ docs_bridge.subjects | zip(coll_check.results) | list }}"
+  loop_control:
+    label: "{{ item.0.collection }}"
+
+- name: Clean up staged snapshot files
+  ansible.builtin.file:
+    path: "/tmp/{{ item.collection }}.snapshot"
+    state: absent
+  loop: "{{ docs_bridge.subjects }}"
+  loop_control:
+    label: "{{ item.collection }}"
+
+# Manifest (SQLite) — restore only when absent (a fresh deploy).
+- name: Check whether the manifest already exists on the host
+  ansible.builtin.stat:
+    path: "{{ docs_bridge.manifest_path | regex_replace('^' ~ container_data_root, data_root) }}"
+  register: manifest_dst
+
+- name: Restore the manifest (fresh deploy only)
+  ansible.builtin.unarchive:
+    src: "{{ application_data }}/{{ application }}/state.tar.gz"
+    dest: "{{ data_root }}/state"
+    remote_src: false
+  when:
+    - "'state.tar.gz' in staged_files"
+    - not manifest_dst.stat.exists

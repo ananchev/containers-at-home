@@ -41,8 +41,17 @@ server:
   port: {{ docs_bridge.server.port }}
   default_k: {{ docs_bridge.server.default_k }}
   prefetch_limit: {{ docs_bridge.server.prefetch_limit }}
+{% if docs_bridge.server.instructions is defined and docs_bridge.server.instructions | trim %}
+  instructions: |
+    {{ docs_bridge.server.instructions | trim | indent(4) }}
+{% endif %}
 
 subjects:
 {% for s in docs_bridge.subjects %}
-  - { name: {{ s.name }}, dir: {{ s.dir }}, collection: {{ s.collection }} }
+  - name: {{ s.name }}
+    dir: {{ s.dir }}
+    collection: {{ s.collection }}
+{% if s.description is defined and s.description | trim %}
+    description: {{ s.description | trim | tojson }}
+{% endif %}
 {% endfor %}

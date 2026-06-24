@@ -1,0 +1,35 @@
+---
+# Run Qdrant (vector store) and wait until it is ready to serve. The network is
+# created in prep.yml.
+
+- name: Run Qdrant (vector store)
+  community.docker.docker_container:
+    name: qdrant
+    image: "{{ qdrant_image }}"
+    network_mode: "{{ docker_network }}"
+    env:
+      # Bind all interfaces INSIDE the container; the from-source default
+      # (config/development.yaml) binds 127.0.0.1, which published ports
+      # and the docs-bridge-net peers can't reach.
+      QDRANT__SERVICE__HOST: "0.0.0.0"
+    ports:
+      - "127.0.0.1:6333:6333"   # host-local, for curl validation + snapshot API
+    volumes:
+      - "{{ data_root }}/qdrant:/qdrant/storage:z"   # :z shared (ingest + server also use /data)
+    restart_policy: unless-stopped
+    detach: true
+
+- name: Wait for Qdrant to accept connections
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 6333
+    timeout: 60
+
+- name: Wait for Qdrant readiness
+  ansible.builtin.uri:
+    url: "{{ qdrant_api }}/readyz"
+    status_code: 200
+  register: qready
+  retries: 10
+  delay: 3
+  until: qready.status == 200

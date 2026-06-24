@@ -34,6 +34,17 @@ backup_definitions:
           done > "$dest/docs-manifest.tsv"
         fi
 
+  # docs-bridge stack, LibreChat side: the conversation/user DB is the only
+  # must-back-up state (meili is a derived index; config is rendered from the repo).
+  # Restored on a fresh deploy by applications/docs-bridge.yml.
+  - application: docs-bridge
+    container: librechat-mongodb
+    backup_commands:
+      - mongodump --db=LibreChat --archive=/tmp/librechat-mongo.archive --gzip
+    copy_actions:
+      - source_path: /tmp/librechat-mongo.archive
+        target_filename: librechat-mongo.archive.gz
+
   - application: zigbee2mqtt
     container: zigbee2mqtt
     backup_commands:

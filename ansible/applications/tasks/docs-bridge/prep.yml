@@ -1,0 +1,55 @@
+---
+# Prep: resolve the effective config, lay down dirs, clone the product repo, render
+# the ingest config.yaml, and create the shared network. Everything downstream
+# (images, qdrant, server, librechat) assumes these exist.
+
+# Merge this host's config tuning over the contract. combine(recursive) because
+# Ansible does not deep-merge dict vars; the tuning's leaf keys win, everything else
+# (embedding_model, chunk, subjects, manifest_path, ...) is preserved from the contract.
+- name: Resolve the effective docs-bridge config for this host
+  ansible.builtin.set_fact:
+    docs_bridge: "{{ docs_bridge | combine(host_tuning[inventory_hostname].config, recursive=true) }}"
+
+- name: Create host + state directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ host_directory }}"
+    - "{{ host_directory }}/config"
+    - "{{ data_root }}/state"    # SQLite manifest
+    - "{{ data_root }}/cache"    # HF + Docling model caches (HOME)
+    - "{{ data_root }}/qdrant"   # Qdrant storage
+
+- name: Create per-subject corpus directories
+  # Human-populated drop folders -> owned by the deploy user so docs can be scp'd in
+  # without sudo. The container reads them as root regardless. (Map the container path
+  # in the contract /data/... to the host root.)
+  ansible.builtin.file:
+    path: "{{ data_root }}{{ item.dir | regex_replace('^' ~ container_data_root, '') }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0755'
+  loop: "{{ docs_bridge.subjects }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Clone/update the docs-bridge product repo
+  ansible.builtin.git:
+    repo: "{{ repo }}"
+    dest: "{{ source_path }}"
+    version: main
+
+- name: Render ingest config.yaml from the config contract
+  ansible.builtin.template:
+    src: "{{ templates_dir }}/docs-bridge-config.yaml.j2"
+    dest: "{{ config_file }}"
+    mode: '0644'
+
+- name: Create the docker network
+  community.docker.docker_network:
+    name: "{{ docker_network }}"
+    driver: bridge
+    state: present

@@ -1,0 +1,49 @@
+# LibreChat config — RENDERED by applications/librechat.yml. Mounted at /app/librechat.yaml
+# (CONFIG_PATH). Schema: https://www.librechat.ai/docs/configuration/librechat_yaml
+version: 1.2.1
+cache: true
+
+# Lock self-registration to email (no social providers); the .env ALLOW_* flags
+# are the master switch.
+registration:
+  socialLogins: []
+
+endpoints:
+  custom:
+    # Single provider: OpenRouter. `fetch: true` populates the model dropdown live
+    # from OpenRouter, so `default` is only the initial selection. apiKey resolves
+    # from the .env (OPENROUTER_API_KEY).
+    - name: "OpenRouter"
+      apiKey: "${OPENROUTER_API_KEY}"
+      baseURL: "https://openrouter.ai/api/v1"
+      models:
+        default: ["anthropic/claude-sonnet-4.5"]
+        fetch: true
+      titleConvo: true
+      # "current_model" reuses the conversation's model for titling — avoids pinning a
+      # second OpenRouter slug that may not exist (a hardcoded one 404'd).
+      titleModel: "current_model"
+      modelDisplayLabel: "OpenRouter"
+      dropParams: ["stop"]
+{% if librechat_enable_mcp | default(false) | bool %}
+
+# ---- docs-bridge over MCP (stage 2.2) -------------------------------------
+# In-host call over docs-bridge-net (container DNS docs-bridge:8080). Static
+# bearer from the .env. LibreChat's SSRF guard blocks private/internal hosts by
+# default, so the in-host address is exempted via mcpSettings.allowedAddresses
+# (an exemption list, NOT a strict whitelist — public targets stay reachable).
+mcpSettings:
+  allowedAddresses:
+    - "docs-bridge:8080"
+mcpServers:
+  docs-bridge:
+    type: streamable-http
+    url: "http://docs-bridge:8080/mcp"
+    # Static-bearer auth. requiresOAuth:false is REQUIRED — without it LibreChat probes
+    # WITHOUT these headers, gets docs-bridge's 401+WWW-Authenticate, and misclassifies
+    # the server as OAuth-protected (then the OAuth flow fails — there's no AS).
+    requiresOAuth: false
+    headers:
+      Authorization: "Bearer ${DOCS_BRIDGE_TOKEN}"
+    timeout: 60000
+{% endif %}

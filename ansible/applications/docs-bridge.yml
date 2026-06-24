@@ -1,19 +1,34 @@
 ---
-# docs-bridge — deploy (operator side). Brings up Qdrant, builds + runs the
-# ingest-worker (INGESTION, design §11/§15) AND the docs-bridge server (MCP + REST
-# search/rerank surface, design §9/§15).
+# docs-bridge — the full RAG stack (operator side), all on docs-bridge-net:
+#   Qdrant (vector store) · ingest-worker (one-shot Docling->BGE-M3->Qdrant ingestion)
+#   · docs-bridge server (hybrid search+rerank, MCP + REST) · LibreChat front-end
+#   (chat UI + OpenRouter synthesis, calls the server over /mcp) + its MongoDB & Meili.
+#   A host systemd timer runs the daily incremental ingest.
+#
+# STRUCTURE: this master is thin — vars (incl. the host-invariant config contract) +
+# tagged imports under tasks/docs-bridge/, in dependency order. Each import carries a
+# tag so one concern can be (re)deployed alone, e.g.:
+#   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K --tags server
+#   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K --tags librechat
+# A full run (no --tags) executes them all. Scoped runs assume the shared bits an
+# earlier phase created (images, network, config) already exist — true after any prior
+# full deploy; a first-ever deploy must run the whole play.
 #
 # Build context: cloned from the product repo github.com/ananchev/docs-bridge. Both
 # images build from the repo ROOT (the docs_bridge package + tools/ are shared);
 # the server image bakes the INT8 bge-m3 + bge-reranker models at build time via the
 # exporter stage. Build tasks have no force_source, so they SKIP when the image is
-# already present (e.g. after a manual docker load).
+# already present (e.g. after a manual docker load). LibreChat/mongo/meili are stock
+# multi-arch images (app_versions: librechat, librechat-mongo, librechat-meili).
 # Runtime: Podman via its Docker-API socket (pre-requisites-podman.yml).
 # Image pin: app_versions['docs-bridge-qdrant'].image (vaulted app_versions.yml).
-# Secret:    docs_bridge_secrets.bearer_token (vault) -> server's DOCS_BRIDGE_TOKEN.
+# Secrets:   docs_bridge_secrets.bearer_token -> server DOCS_BRIDGE_TOKEN (+ the MCP
+#            header when librechat_enable_mcp); librechat_secrets.* (see notes).
 #
 #   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K
-#   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e run_sync=true   # + ingest
+#   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e run_sync=true                 # + one-shot ingest
+#   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e librechat_enable_mcp=true      # 2.2: wire LibreChat->/mcp
+#   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e librechat_allow_registration=false  # close signups
 - hosts: homelab
   become: true
   gather_facts: false
@@ -24,6 +39,10 @@
     repo: https://github.com/ananchev/docs-bridge.git
     source_path: "{{ host_directory }}/source"
     config_file: "{{ host_directory }}/config/config.yaml"
+    # Templates live in ansible/_templates; build an absolute path from playbook_dir
+    # so the nested tasks/docs-bridge/*.yml files resolve `src` unambiguously (a bare
+    # ../_templates is resolved relative to the task file, not the playbook).
+    templates_dir: "{{ playbook_dir }}/../_templates"
     # Host-specific payload root (host_vars). Containers always see it as /data,
     # so the config contract's /data/... paths stay host-agnostic.
     data_root: "{{ docs_bridge_data_root }}"
@@ -37,6 +56,32 @@
     qdrant_api: "http://127.0.0.1:6333"
     server_image: "{{ application }}:latest"   # docs-bridge:latest, built from source like ingest-worker
     run_sync: false   # -e run_sync=true to trigger an ingest after deploy
+    # Default so scoped runs that skip the restore concern (which set_facts it) don't
+    # fail on the mongo/qdrant restore guards. The restore tasks override it live.
+    staged_files: []
+
+    # --- LibreChat (chat UI + OpenRouter synthesis; the stack's front-end) --------
+    # mongo + meili + librechat on docs-bridge-net, so LibreChat reaches the server's
+    # MCP at http://docs-bridge:8080/mcp by container DNS (no extra network). LAN-only.
+    web_port: "{{ application_services[application].ports.librechat }}"
+    librechat_lan_ip: 192.168.2.199                                # vhost2 (lan_addresses.yml)
+    librechat_base_url: "http://{{ librechat_lan_ip }}:{{ web_port }}"
+    librechat_dir: "{{ host_directory }}/librechat"
+    librechat_config_dir: "{{ librechat_dir }}/config"
+    librechat_enable_mcp: false        # 2.2: wire the docs-bridge mcpServers block + token
+    librechat_allow_registration: true # open for the first account; flip false after
+    # Session lifetime (ms expressions). Long access token so a LAN session isn't
+    # bounced to login on brief inactivity (the http-origin refresh cookie is flaky).
+    librechat_session_expiry: "1000 * 60 * 60 * 12"        # access token: 12h
+    librechat_refresh_expiry: "1000 * 60 * 60 * 24 * 30"   # stay-logged-in: 30d
+    librechat_images:
+      app: "{{ app_versions['librechat'].image }}"
+      mongo: "{{ app_versions['librechat-mongo'].image }}"
+      meili: "{{ app_versions['librechat-meili'].image }}"
+
+    # Daily incremental ingest, run on the host via a systemd timer (the ingest-worker
+    # is a one-shot CLI). Override the schedule with -e docs_bridge_ingest_oncalendar=...
+    docs_bridge_ingest_oncalendar: "*-*-* 03:30:00"
 
     # docs-bridge config contract — host-INVARIANT, non-secret. The boundary with
     # the product repo (design §6). Host-varying knobs are in
@@ -78,9 +123,37 @@
         port: 8080
         default_k: 6
         prefetch_limit: 50
+        # MCP server `instructions` injected into the consuming LLM (LibreChat) to steer
+        # how it uses search results — citation + answer-language policy. Tunable HERE:
+        # re-render config.yaml + `docker restart docs-bridge` (no image rebuild).
+        # CORPUS-AGNOSTIC policy only. The per-corpus catalog ("Available corpora:
+        # - aig: ... - esys: ...") is auto-composed by the server from the subject
+        # descriptions below, so this text never names a corpus.
+        instructions: |
+          This server ("docs-bridge") retrieves internal technical documentation via
+          the `search` tool. When you answer a question using it:
+          - Ground every statement ONLY in the returned chunks. If they do not contain
+            the answer, say so plainly instead of guessing.
+          - Cite the source of each claim inline using the chunk's `source_path` and
+            `section` fields, e.g. "(t4s_mapping_config - Mapping Configuration)", and
+            list the sources you relied on at the end.
+          - Reply in the SAME language as the user's question (default to English if
+            unclear), regardless of the language of the source documents.
+      # Each corpus: name/dir/collection + a description (the single source of truth
+      # for "what this corpus is" — surfaced via list_subjects() and auto-composed into
+      # the MCP instructions catalog). Add a corpus = add a block + drop docs + ingest.
       subjects:
-        - { name: aig,  dir: /data/docs/aig,  collection: aig }
-        - { name: esys, dir: /data/docs/esys, collection: esys }
+        - name: aig
+          dir: /data/docs/aig
+          collection: aig
+          description: >-
+            Siemens Active Integration / Teamcenter Gateway for SAP (T4S, T4O):
+            mapping configuration, BAPIs, PLMXML, routing, transaction handling.
+        - name: esys
+          dir: /data/docs/esys
+          collection: esys
+          description: >-
+            Ecosys (EcoSys EPC): project controls, cost and schedule management.
 
     # Per-host deployment tuning — kept in this operator playbook on purpose:
     # NOT in host_vars (host facts only) and NOT in the product repo (the app
@@ -102,251 +175,37 @@
     - name: Deploy docs-bridge on its designated host
       when: inventory_hostname in application_services[application].hosts
       block:
+        # Dependency order: prep (config + dirs + repo + render + network) -> build
+        # images -> Qdrant -> restore (snapshots + manifest) -> server -> LibreChat
+        # -> schedule (ingest timer) -> on-demand ingest. Each import is tagged.
+        - name: Prep — config merge, dirs, repo, rendered config, network
+          ansible.builtin.import_tasks: tasks/docs-bridge/prep.yml
+          tags: [prep]
 
-        # Merge this host's config tuning over the contract. combine(recursive)
-        # because Ansible does not deep-merge dict vars; the tuning's leaf keys
-        # win, everything else (embedding_model, chunk, subjects, manifest_path,
-        # ...) is preserved from the docs_bridge contract above.
-        - name: Resolve the effective docs-bridge config for this host
-          ansible.builtin.set_fact:
-            docs_bridge: "{{ docs_bridge | combine(host_tuning[inventory_hostname].config, recursive=true) }}"
+        - name: Images — build ingest-worker, server, qdrant
+          ansible.builtin.import_tasks: tasks/docs-bridge/images.yml
+          tags: [images, build]
 
-        - name: Create host + state directories
-          ansible.builtin.file:
-            path: "{{ item }}"
-            state: directory
-            mode: '0755'
-          loop:
-            - "{{ host_directory }}"
-            - "{{ host_directory }}/config"
-            - "{{ data_root }}/state"    # SQLite manifest
-            - "{{ data_root }}/cache"    # HF + Docling model caches (HOME)
-            - "{{ data_root }}/qdrant"   # Qdrant storage
+        - name: Qdrant — run the vector store + readiness
+          ansible.builtin.import_tasks: tasks/docs-bridge/qdrant.yml
+          tags: [qdrant]
 
-        - name: Create per-subject corpus directories
-          # Human-populated drop folders -> owned by the deploy user so docs can be
-          # scp'd in without sudo. The container reads them as root regardless.
-          # (Map the container path in the contract /data/... to the host root.)
-          ansible.builtin.file:
-            path: "{{ data_root }}{{ item.dir | regex_replace('^' ~ container_data_root, '') }}"
-            state: directory
-            owner: "{{ ansible_user }}"
-            group: "{{ ansible_user }}"
-            mode: '0755'
-          loop: "{{ docs_bridge.subjects }}"
-          loop_control:
-            label: "{{ item.name }}"
+        - name: Restore — Qdrant snapshots + manifest (fresh deploy)
+          ansible.builtin.import_tasks: tasks/docs-bridge/restore.yml
+          tags: [restore]
 
-        - name: Clone/update the docs-bridge product repo
-          ansible.builtin.git:
-            repo: "{{ repo }}"
-            dest: "{{ source_path }}"
-            version: main
+        - name: Server — docs-bridge MCP/REST
+          ansible.builtin.import_tasks: tasks/docs-bridge/server.yml
+          tags: [server]
 
-        - name: Render ingest config.yaml from the config contract
-          ansible.builtin.template:
-            src: ../_templates/docs-bridge-config.yaml.j2
-            dest: "{{ config_file }}"
-            mode: '0644'
+        - name: LibreChat — mongo, meili, app (+ DB restore-on-fresh)
+          ansible.builtin.import_tasks: tasks/docs-bridge/librechat.yml
+          tags: [librechat]
 
-        # docker_image build over Podman's compat API (design §3 / deployment-
-        # boundary memory). Context = repo ROOT (shared docs_bridge package),
-        # Dockerfile under images/. No force_source -> SKIPS when the image is
-        # already present (e.g. after a manual docker load on a constrained host).
-        - name: Build the ingest-worker image
-          community.docker.docker_image:
-            name: ingest-worker:latest
-            source: build
-            build:
-              path: "{{ source_path }}"
-              dockerfile: images/ingest-worker/Dockerfile
-              rm: true
+        - name: Schedule — daily ingest systemd timer
+          ansible.builtin.import_tasks: tasks/docs-bridge/schedule.yml
+          tags: [schedule]
 
-        - name: Build the docs-bridge server image
-          community.docker.docker_image:
-            name: "{{ server_image }}"
-            source: build
-            build:
-              path: "{{ source_path }}"
-              dockerfile: images/docs-bridge/Dockerfile
-              rm: true
-
-        # From-source build (jemalloc for 16K pages — both the M2 and other
-        # aarch64 hosts need this). Only rebuilds when the image is absent, so
-        # redeploys skip it. Bumping the version in app_versions changes the tag ->
-        # next deploy rebuilds. Tagged as the upstream ref so diun watches
-        # qdrant/qdrant for new releases.
-        - name: Build the qdrant image (16K-page jemalloc, version from app_versions)
-          community.docker.docker_image:
-            name: "{{ qdrant_image }}"
-            source: build
-            build:
-              path: "{{ source_path }}/images/qdrant"
-              args:
-                QDRANT_VERSION: "{{ qdrant_version }}"
-                CARGO_BUILD_JOBS: "{{ host_tuning[inventory_hostname].cargo_build_jobs }}"
-              rm: true
-
-        # (3) Reclaim space: drop the multi-stage builder layers (the Rust target
-        # is several GB) and any leftover build containers.
-        - name: Prune dangling build images
-          ansible.builtin.command: docker image prune -f
-          changed_when: true
-
-        - name: Prune leftover build containers
-          ansible.builtin.command: docker container prune -f
-          changed_when: false
-
-        - name: Create the docker network
-          community.docker.docker_network:
-            name: "{{ docker_network }}"
-            driver: bridge
-            state: present
-
-        - name: Run Qdrant (vector store)
-          community.docker.docker_container:
-            name: qdrant
-            image: "{{ qdrant_image }}"
-            network_mode: "{{ docker_network }}"
-            env:
-              # Bind all interfaces INSIDE the container; the from-source default
-              # (config/development.yaml) binds 127.0.0.1, which published ports
-              # and the docs-bridge-net peers can't reach.
-              QDRANT__SERVICE__HOST: "0.0.0.0"
-            ports:
-              - "127.0.0.1:6333:6333"   # host-local, for curl validation + snapshot API
-            volumes:
-              - "{{ data_root }}/qdrant:/qdrant/storage:z"   # :z shared (ingest + server also use /data)
-            restart_policy: unless-stopped
-            detach: true
-
-        - name: Wait for Qdrant to accept connections
-          ansible.builtin.wait_for:
-            host: 127.0.0.1
-            port: 6333
-            timeout: 60
-
-        - name: Wait for Qdrant readiness
-          ansible.builtin.uri:
-            url: "{{ qdrant_api }}/readyz"
-            status_code: 200
-          register: qready
-          retries: 10
-          delay: 3
-          until: qready.status == 200
-
-        # --- Restore-on-fresh-deploy via Qdrant snapshot API (idempotent) ----
-        # Recovery needs a live Qdrant, so it runs after readiness. Per collection:
-        #   snapshot absent       -> do nothing
-        #   snapshot + collection missing  -> recover it
-        #   collection already present (redeploy) -> leave it alone
-        # Archives are staged on the control node at application_data/docs-bridge/.
-        # Control-node file presence is discovered with the fileglob lookup, which
-        # runs on the controller (no delegate_to: localhost, which can hang under a
-        # become: true play). copy/unarchive read their src from the controller
-        # natively. An empty/absent application_data dir -> staged_files == [] ->
-        # every restore is skipped (the "no backup" case).
-        - name: Discover staged restore archives on the control node
-          ansible.builtin.set_fact:
-            staged_files: "{{ lookup('ansible.builtin.fileglob', application_data ~ '/' ~ application ~ '/*', wantlist=true) | map('basename') | list }}"
-
-        - name: Check which collections already exist in Qdrant
-          ansible.builtin.uri:
-            url: "{{ qdrant_api }}/collections/{{ item.collection }}"
-            status_code: [200, 404]
-          register: coll_check
-          loop: "{{ docs_bridge.subjects }}"
-          loop_control:
-            label: "{{ item.collection }}"
-
-        - name: Stage snapshots on the host for collections needing restore
-          ansible.builtin.copy:
-            src: "{{ application_data }}/{{ application }}/{{ item.0.collection }}.snapshot"
-            dest: "/tmp/{{ item.0.collection }}.snapshot"
-            mode: '0644'
-          when:
-            - (item.0.collection ~ '.snapshot') in staged_files   # snapshot staged
-            - item.1.status == 404                                # collection absent
-          loop: "{{ docs_bridge.subjects | zip(coll_check.results) | list }}"
-          loop_control:
-            label: "{{ item.0.collection }}"
-
-        - name: Recover collections from uploaded snapshots
-          ansible.builtin.command: >
-            curl -sf -X POST
-            "{{ qdrant_api }}/collections/{{ item.0.collection }}/snapshots/upload?priority=snapshot"
-            -F "snapshot=@/tmp/{{ item.0.collection }}.snapshot"
-          when:
-            - (item.0.collection ~ '.snapshot') in staged_files
-            - item.1.status == 404
-          loop: "{{ docs_bridge.subjects | zip(coll_check.results) | list }}"
-          loop_control:
-            label: "{{ item.0.collection }}"
-
-        - name: Clean up staged snapshot files
-          ansible.builtin.file:
-            path: "/tmp/{{ item.collection }}.snapshot"
-            state: absent
-          loop: "{{ docs_bridge.subjects }}"
-          loop_control:
-            label: "{{ item.collection }}"
-
-        # Manifest (SQLite) — restore only when absent (a fresh deploy).
-        - name: Check whether the manifest already exists on the host
-          ansible.builtin.stat:
-            path: "{{ docs_bridge.manifest_path | regex_replace('^' ~ container_data_root, data_root) }}"
-          register: manifest_dst
-
-        - name: Restore the manifest (fresh deploy only)
-          ansible.builtin.unarchive:
-            src: "{{ application_data }}/{{ application }}/state.tar.gz"
-            dest: "{{ data_root }}/state"
-            remote_src: false
-          when:
-            - "'state.tar.gz' in staged_files"
-            - not manifest_dst.stat.exists
-
-        # --- docs-bridge server (MCP + REST), design §9/§15 ------------------
-        # Holds the baked INT8 bge-m3 (query embed) + bge-reranker; talks to qdrant
-        # over the network (lazy-connect, so no startup ordering dependency). Only
-        # mounts the rendered config + a writable cache dir (models are baked, not
-        # mounted). Published host-local for the §15 curl validation; public
-        # exposure via NPM/Cloudflare comes with the M2/LibreChat step.
-        - name: Run the docs-bridge server
-          community.docker.docker_container:
-            name: "{{ application }}"
-            image: "{{ server_image }}"
-            network_mode: "{{ docker_network }}"
-            env:
-              DOCS_BRIDGE_CONFIG: /config/config.yaml
-              DOCS_BRIDGE_TOKEN: "{{ docs_bridge_secrets.bearer_token }}"
-            ports:
-              - "127.0.0.1:{{ docs_bridge.server.port }}:{{ docs_bridge.server.port }}"
-            volumes:
-              - "{{ config_file }}:/config/config.yaml:ro,z"
-              - "{{ data_root }}/cache:/data/cache:z"
-            restart_policy: unless-stopped
-            detach: true
-
-        # One-shot ingest. A `docker run` shell task (not docker_container) so we
-        # capture the sync's stdout for the §15 idempotency check (0/0/0 on no change).
-        - name: Run a one-shot ingest sync
-          when: run_sync | bool
-          # Mount only the subdirs the worker needs (each :z relabels fine).
-          # Podman refuses to relabel a whole filesystem-root mount like /data, and
-          # relabeling 446GB (incl. qdrant's live storage) every run would be wrong.
-          ansible.builtin.command: >
-            docker run --rm
-            --network {{ docker_network }}
-            -v {{ data_root }}/docs:{{ container_data_root }}/docs:ro,z
-            -v {{ data_root }}/state:{{ container_data_root }}/state:z
-            -v {{ data_root }}/cache:{{ container_data_root }}/cache:z
-            -v {{ config_file }}:/config/config.yaml:ro,z
-            ingest-worker:latest sync --subject all --verbose
-          register: ingest_run
-          changed_when: true
-
-        - name: Show ingest result
-          when: run_sync | bool
-          ansible.builtin.debug:
-            var: ingest_run.stdout_lines
+        - name: Ingest — one-shot sync (run_sync) + idempotency check
+          ansible.builtin.import_tasks: tasks/docs-bridge/ingest.yml
+          tags: [ingest]

@@ -1,0 +1,25 @@
+---
+# On-demand one-shot ingest (only when -e run_sync=true). A `docker run` shell task
+# (not docker_container) so we capture the sync's stdout for the §15 idempotency check
+# (0/0/0 on no change). The daily run is the systemd timer from schedule.yml.
+
+- name: Run a one-shot ingest sync
+  when: run_sync | bool
+  # Mount only the subdirs the worker needs (each :z relabels fine). Podman refuses to
+  # relabel a whole filesystem-root mount like /data, and relabeling 446GB (incl.
+  # qdrant's live storage) every run would be wrong.
+  ansible.builtin.command: >
+    docker run --rm
+    --network {{ docker_network }}
+    -v {{ data_root }}/docs:{{ container_data_root }}/docs:ro,z
+    -v {{ data_root }}/state:{{ container_data_root }}/state:z
+    -v {{ data_root }}/cache:{{ container_data_root }}/cache:z
+    -v {{ config_file }}:/config/config.yaml:ro,z
+    ingest-worker:latest sync --subject all --verbose
+  register: ingest_run
+  changed_when: true
+
+- name: Show ingest result
+  when: run_sync | bool
+  ansible.builtin.debug:
+    var: ingest_run.stdout_lines

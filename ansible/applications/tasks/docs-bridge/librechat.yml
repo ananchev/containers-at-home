@@ -1,0 +1,138 @@
+---
+# LibreChat front-end (chat UI + OpenRouter synthesis): mongo + meili + the app, all on
+# docs-bridge-net so LibreChat reaches the server's MCP at http://docs-bridge:8080/mcp
+# by container DNS. LAN-only.
+
+- name: Create LibreChat directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ librechat_dir }}"
+    - "{{ librechat_config_dir }}"
+    - "{{ librechat_dir }}/mongo"     # mongod /data/db (entrypoint self-chowns)
+    - "{{ librechat_dir }}/meili"     # meilisearch /meili_data
+    - "{{ librechat_dir }}/images"    # app-written; owned by the node uid below
+    - "{{ librechat_dir }}/uploads"
+    - "{{ librechat_dir }}/logs"
+
+# The librechat image runs as the non-root `node` user (uid 1000); bind mounts inherit
+# host ownership, so chown the app-written dirs or it EACCES.
+- name: Give the node user ownership of the LibreChat app dirs
+  ansible.builtin.file:
+    path: "{{ librechat_dir }}/{{ item }}"
+    state: directory
+    owner: '1000'
+    group: '1000'
+    mode: '0755'
+  loop: [images, uploads, logs]
+
+- name: Detect a fresh MongoDB (empty data dir, before first start)
+  ansible.builtin.find:
+    paths: "{{ librechat_dir }}/mongo"
+  register: mongo_data_pre
+
+- name: Render the LibreChat .env (env_file)
+  ansible.builtin.template:
+    src: "{{ templates_dir }}/librechat/env.j2"
+    dest: "{{ librechat_config_dir }}/librechat.env"
+    mode: '0640'
+
+- name: Render librechat.yaml (app config)
+  ansible.builtin.template:
+    src: "{{ templates_dir }}/librechat/librechat.yaml.j2"
+    dest: "{{ librechat_config_dir }}/librechat.yaml"
+    mode: '0644'
+
+- name: Run MongoDB
+  # Image MUST be mongodb/mongodb-community-server (multi-arch incl. arm64); the Docker
+  # Hub library/mongo only ships amd64 + Windows. No `command` override — both flavours
+  # default to no access control when MONGODB_INITDB_ROOT_USERNAME is unset, which is
+  # fine on this isolated network (no published port).
+  community.docker.docker_container:
+    name: librechat-mongodb
+    image: "{{ librechat_images.mongo }}"
+    network_mode: "{{ docker_network }}"
+    volumes:
+      - "{{ librechat_dir }}/mongo:/data/db:Z"
+    restart_policy: unless-stopped
+    detach: true
+
+- name: Run Meilisearch
+  community.docker.docker_container:
+    name: librechat-meilisearch
+    image: "{{ librechat_images.meili }}"
+    network_mode: "{{ docker_network }}"
+    env:
+      MEILI_MASTER_KEY: "{{ librechat_secrets.meili_master_key }}"
+      MEILI_NO_ANALYTICS: "true"
+      MEILI_ENV: production
+    volumes:
+      - "{{ librechat_dir }}/meili:/meili_data:Z"
+    restart_policy: unless-stopped
+    detach: true
+
+# Restore the conversation DB on a FRESH deploy only (archive staged on the control
+# node + the mongo data dir was empty before this run). Mirrors the qdrant/manifest
+# restore-on-fresh; a no-op until a backup exists.
+- name: Restore MongoDB on a fresh deploy
+  when:
+    - "'librechat-mongo.archive.gz' in staged_files"
+    - mongo_data_pre.matched == 0
+  block:
+    - name: Wait for MongoDB to accept connections
+      ansible.builtin.command: >
+        docker exec librechat-mongodb
+        mongosh --quiet --eval "db.runCommand({ ping: 1 }).ok"
+      register: mongo_ping
+      until: mongo_ping.rc == 0 and (mongo_ping.stdout | trim) == "1"
+      retries: 20
+      delay: 3
+      changed_when: false
+
+    - name: Stage the mongo archive on the host
+      ansible.builtin.copy:
+        src: "{{ application_data }}/{{ application }}/librechat-mongo.archive.gz"
+        dest: /tmp/librechat-mongo.archive.gz
+        mode: '0644'
+
+    - name: Copy the archive into the mongo container
+      ansible.builtin.command: >
+        docker cp /tmp/librechat-mongo.archive.gz
+        librechat-mongodb:/tmp/librechat-mongo.archive.gz
+
+    - name: Restore the LibreChat database
+      ansible.builtin.command: >
+        docker exec librechat-mongodb
+        mongorestore --archive=/tmp/librechat-mongo.archive.gz --gzip --drop
+
+    - name: Clean up the staged mongo archive
+      ansible.builtin.file:
+        path: /tmp/librechat-mongo.archive.gz
+        state: absent
+
+- name: Run the LibreChat app
+  community.docker.docker_container:
+    name: librechat
+    image: "{{ librechat_images.app }}"
+    network_mode: "{{ docker_network }}"
+    env_file: "{{ librechat_config_dir }}/librechat.env"
+    volumes:
+      - "{{ librechat_config_dir }}/librechat.yaml:/app/librechat.yaml:ro,Z"
+      - "{{ librechat_dir }}/images:/app/client/public/images:z"
+      - "{{ librechat_dir }}/uploads:/app/uploads:z"
+      - "{{ librechat_dir }}/logs:/app/api/logs:z"
+    ports:
+      # 0.0.0.0 bind so LAN clients reach vhost2:3080 directly (no proxy).
+      - "{{ web_port }}:3080"
+    restart_policy: unless-stopped
+    detach: true
+
+- name: LibreChat first-run reminder
+  ansible.builtin.debug:
+    msg: >-
+      LibreChat (LAN-only) at {{ librechat_base_url }}. Register your account,
+      then re-run with -e librechat_allow_registration=false. MCP wired:
+      {{ librechat_enable_mcp | bool }}. Daily ingest timer
+      {{ docs_bridge_ingest_oncalendar }} (journalctl -u docs-bridge-ingest).
