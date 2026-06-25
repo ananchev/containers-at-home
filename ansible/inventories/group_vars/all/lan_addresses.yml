@@ -17,4 +17,4 @@ lan_addresses:
   vhost2: 192.168.2.199
   pi5: 192.168.2.11
   vm: 192.168.2.34
-  bnod: bg.tonio.cc
+  bnod: 192.168.111.111

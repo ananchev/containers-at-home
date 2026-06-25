@@ -1,7 +1,7 @@
 #jinja2: trim_blocks: True, lstrip_blocks: True
 ---
 # Information widgets (header). All keyless: openmeteo needs no API key, and
-# resources reports the host running Homepage (fed).
+# resources reports the host running Homepage
 - search:
     provider: duckduckgo
     target: _blank
@@ -9,15 +9,15 @@
     text_size: xl
     format:
       timeStyle: short
-      dateStyle: long
+      dateStyle: short
 - openmeteo:
-    label: Amsterdam
-    latitude: 52.37
-    longitude: 4.90
+    label: Here
+    latitude: 32.09
+    longitude: 15.07
     units: metric
     cache: 5
 - resources:
-    label: fed
+    label: pi5
     cpu: true
     memory: true
     disk: /
