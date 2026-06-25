@@ -1,6 +1,9 @@
 ---
-# Restore-on-fresh-deploy via the Qdrant snapshot API + the SQLite manifest. Needs a
-# live Qdrant (qdrant.yml runs first). Per collection:
+# Restore via the Qdrant snapshot API + the SQLite manifest. OPT-IN: the whole import
+# is gated on `run_restore` in the master playbook, so a normal deploy / restart does
+# NOT enter here. When armed, the per-target guards below are still the safety net (they
+# only ever write to a fresh/absent target). Needs a live Qdrant (qdrant.yml runs first).
+# Per collection:
 #   snapshot absent                       -> do nothing
 #   snapshot staged + collection missing  -> recover it
 #   collection already present (redeploy) -> leave it alone

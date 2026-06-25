@@ -28,9 +28,17 @@ so a restored index can be traced back to its source files.
 - Run it now (don't wait for cron):
   `sudo docker exec containers-backup-node /ansible/backups/run-backup-playbook.sh`
 
-## Restore — in the deploy playbook, idempotent
-Per subject on deploy: snapshot staged + collection missing → recover; collection present →
-leave it; manifest restored only if absent.
+## Restore — opt-in, in the deploy playbook, idempotent
+**Disarmed by default.** A normal deploy, a `--tags`-scoped run, or a plain
+`docker restart docs-bridge` restores NOTHING. Arm it explicitly with **`-e run_restore=true`**
+(gates the whole `restore` import + the LibreChat mongo restore block). The flag is the switch;
+the per-target guards below are the safety net underneath it, not the trigger — so even armed,
+restore only ever writes to a fresh/absent target:
+per subject, snapshot staged + collection missing → recover; collection present → leave it;
+manifest restored only if absent; mongo restored only if its data dir was empty pre-run.
+
+Typical use: a first-ever deploy onto a clean host with archives staged. To rebuild only the
+index from a snapshot, scope + arm: `--tags restore -e run_restore=true`.
 
 - Restore reads staged archives from the **control node** at `application_data/docs-bridge/`,
   NOT from ZFS automatically. Manual hop: mount ZFS on the control node (or copy) so
@@ -40,17 +48,43 @@ leave it; manifest restored only if absent.
 - Good round-trip proof: after restore, `points_count` matches AND a sync prints
   `0/0/0 unchanged` (collection + manifest consistent → no re-embed).
 
-## Add a new subject (collection) — config only
-1. Add a block to `docs_bridge.subjects` in the playbook with name/dir/collection +
-   a `description:` (the single source of truth for what the corpus is — surfaced via
-   `list_subjects()` and auto-composed into the MCP instructions catalog the model sees).
-   The `server.instructions` policy text stays corpus-agnostic; don't name corpora there.
-2. Re-run the deploy → creates the `/data/docs/X` drop dir + re-renders config.
-3. `scp` docs to `<host>:/data/docs/X/`.
-4. Ingest: `-e run_sync=true` (or `docker run … sync --subject X`).
+## Managing collections (add / remove / rename)
 
-Auto picked up by backup next run; restorable because it's now a listed subject. Removing a
-subject does NOT drop its Qdrant collection (no GC) — delete by hand if unwanted.
+A "collection" = a `subject` block in `docs_bridge.subjects` (the contract). Routing is
+LLM-driven: the model reads each pool's `description` (via `list_subjects`) and picks the
+`subject` to `search` — a single name, a **list**, or **`"all"`** (multi-subject search,
+candidates gathered across pools and reranked GLOBALLY, total bounded by `rerank.multi_top_n`,
+default 60). So **descriptions are the routing signal**: keep them distinctive and keyword-rich,
+encode cross-pool relationships in them (e.g. *"AIG runs on / is configured through Teamcenter"*),
+and keep `server.instructions` corpus-agnostic (the per-pool catalog is auto-composed from the
+descriptions). Pool by distinct product/domain, ~3–8 pools; handle overlap at query time
+(multi-subject), not by splitting.
+
+### Add a collection — config only (no image rebuild)
+1. Add a block to `docs_bridge.subjects`: `name` / `dir: /data/docs/<name>` /
+   `collection: <name>` / `description: >- …` (the single source of truth for what the corpus
+   is — surfaced via `list_subjects()` and auto-composed into the model's catalog).
+2. Re-run the deploy → creates the `<data_root>/docs/<name>` drop dir, re-renders `config.yaml`,
+   and the server re-reads subjects on restart. No rebuild.
+3. `scp` docs to `<host>:<data_root>/docs/<name>/`.
+4. Ingest: `-e run_sync=true` (or `docker run … sync --subject <name>`).
+
+Auto picked up by backup next run; restorable because it's a listed subject.
+
+### Remove a collection
+1. Delete its block from `docs_bridge.subjects`; re-run the deploy (server stops listing/searching it).
+2. The Qdrant collection is NOT auto-dropped (no GC) — drop it by hand:
+   `curl -sf -X DELETE http://127.0.0.1:6333/collections/<name>`
+3. (optional) remove the drop dir `<data_root>/docs/<name>`; orphaned manifest rows are harmless
+   (nothing scans a non-listed subject).
+
+### Rename a collection (e.g. aig → teamcenter)
+Qdrant has no rename, and a collection's vectors can't move — so this is remove + add against the
+SAME docs, i.e. a **re-embed** into the new collection:
+1. Move the docs: `sudo mv <data_root>/docs/<old>/* <data_root>/docs/<new>/`.
+2. Repoint the subject block to the new `name`/`dir`/`collection`; deploy with `-e run_sync=true`
+   → ingests `<new>` (full re-embed; ~hardware-bound, ~1h for the ~4.8k-chunk aig set).
+3. Drop the old collection: `curl -sf -X DELETE http://127.0.0.1:6333/collections/<old>`.
 
 ## Daily delta re-ingest (host systemd timer)
 Ingest is incremental (hash-delta): `sync --subject all` only parses+embeds new/changed files

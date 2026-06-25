@@ -36,6 +36,7 @@ rerank:
   int8: {{ docs_bridge.rerank.int8 | string | lower }}
   max_length: {{ docs_bridge.rerank.max_length }}
   top_n: {{ docs_bridge.rerank.top_n }}
+  multi_top_n: {{ docs_bridge.rerank.multi_top_n | default(docs_bridge.rerank.top_n) }}
 
 server:
   port: {{ docs_bridge.server.port }}

@@ -27,6 +27,7 @@
 #
 #   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K
 #   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e run_sync=true                 # + one-shot ingest
+#   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e run_restore=true               # opt-in restore (qdrant + manifest + mongo)
 #   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e librechat_enable_mcp=true      # 2.2: wire LibreChat->/mcp
 #   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e librechat_allow_registration=false  # close signups
 - hosts: homelab
@@ -56,8 +57,15 @@
     qdrant_api: "http://127.0.0.1:6333"
     server_image: "{{ application }}:latest"   # docs-bridge:latest, built from source like ingest-worker
     run_sync: false   # -e run_sync=true to trigger an ingest after deploy
-    # Default so scoped runs that skip the restore concern (which set_facts it) don't
-    # fail on the mongo/qdrant restore guards. The restore tasks override it live.
+    # Restore is OPT-IN. A normal deploy / container restart NEVER restores — it would
+    # only ever fire on a genuinely fresh target anyway (the 404 / absent-manifest /
+    # empty-mongo-dir guards in restore.yml + librechat.yml), but those guards are the
+    # second line of defence, not the switch. Raise this flag to arm the restore concern
+    # (qdrant snapshots + manifest + librechat mongo), still subject to every guard:
+    #   -e run_restore=true   (typically a first-ever deploy with archives staged)
+    run_restore: false
+    # Default so runs with restore DISARMED (the normal case) still satisfy the mongo
+    # guard's reference to staged_files. restore.yml set_facts it live when armed.
     staged_files: []
 
     # --- LibreChat (chat UI + OpenRouter synthesis; the stack's front-end) --------
@@ -119,6 +127,10 @@
         # RRF rank 40). ~10.8s warm (rerank is ~270ms/candidate). top_n was measured,
         # not guessed: 16 lost answers, dense-only/union/ES all tested worse than RRF.
         top_n: 40
+        # Total rerank budget when a search spans MULTIPLE pools (subject=list|"all").
+        # Larger than top_n so cross-pool hits aren't squeezed out; bounded regardless
+        # of pool count (a single-pool search still uses top_n).
+        multi_top_n: 60
       server:
         port: 8080
         default_k: 6
@@ -142,18 +154,24 @@
       # Each corpus: name/dir/collection + a description (the single source of truth
       # for "what this corpus is" — surfaced via list_subjects() and auto-composed into
       # the MCP instructions catalog). Add a corpus = add a block + drop docs + ingest.
+      # Product-level pools; overlap is handled at query time (multi-subject search),
+      # NOT by splitting — so AIG lives inside `teamcenter` (it runs on/through TC).
+      # Relationships are encoded in the descriptions (the model's routing signal).
       subjects:
-        - name: aig
-          dir: /data/docs/aig
-          collection: aig
+        - name: teamcenter
+          dir: /data/docs/teamcenter
+          collection: teamcenter
           description: >-
-            Siemens Active Integration / Teamcenter Gateway for SAP (T4S, T4O):
-            mapping configuration, BAPIs, PLMXML, routing, transaction handling.
-        - name: esys
-          dir: /data/docs/esys
-          collection: esys
+            Siemens Teamcenter PLM — installation, configuration, administration,
+            server/client APIs, SOA & ITK development and customization, and the
+            Active Integration Gateway (T4S/T4O) for SAP integration (AIG runs on and
+            is configured through Teamcenter, so AIG/install/config topics live here).
+        - name: ecosys
+          dir: /data/docs/ecosys
+          collection: ecosys
           description: >-
-            Ecosys (EcoSys EPC): project controls, cost and schedule management.
+            Siemens Ecosys (EcoSys EPC) — enterprise project performance: project
+            controls, cost management, scheduling and forecasting.
 
     # Per-host deployment tuning — kept in this operator playbook on purpose:
     # NOT in host_vars (host facts only) and NOT in the product repo (the app
@@ -176,8 +194,8 @@
       when: inventory_hostname in application_services[application].hosts
       block:
         # Dependency order: prep (config + dirs + repo + render + network) -> build
-        # images -> Qdrant -> restore (snapshots + manifest) -> server -> LibreChat
-        # -> schedule (ingest timer) -> on-demand ingest. Each import is tagged.
+        # images -> Qdrant -> restore (OPT-IN: snapshots + manifest) -> server ->
+        # LibreChat -> schedule (ingest timer) -> on-demand ingest. Each import is tagged.
         - name: Prep — config merge, dirs, repo, rendered config, network
           ansible.builtin.import_tasks: tasks/docs-bridge/prep.yml
           tags: [prep]
@@ -190,8 +208,11 @@
           ansible.builtin.import_tasks: tasks/docs-bridge/qdrant.yml
           tags: [qdrant]
 
-        - name: Restore — Qdrant snapshots + manifest (fresh deploy)
+        # OPT-IN: disarmed unless -e run_restore=true. The `restore` tag scopes a run
+        # to this concern; the flag is what actually arms it (own guards still apply).
+        - name: Restore — Qdrant snapshots + manifest (opt-in, fresh target only)
           ansible.builtin.import_tasks: tasks/docs-bridge/restore.yml
+          when: run_restore | bool
           tags: [restore]
 
         - name: Server — docs-bridge MCP/REST

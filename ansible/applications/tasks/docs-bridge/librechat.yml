@@ -73,11 +73,14 @@
     restart_policy: unless-stopped
     detach: true
 
-# Restore the conversation DB on a FRESH deploy only (archive staged on the control
-# node + the mongo data dir was empty before this run). Mirrors the qdrant/manifest
-# restore-on-fresh; a no-op until a backup exists.
+# Restore the conversation DB — OPT-IN (-e run_restore=true) AND only on a genuinely
+# fresh deploy (archive staged on the control node + the mongo data dir was empty
+# before this run). Mirrors the qdrant/manifest restore; a no-op until a backup exists.
+# Note: staged_files is populated by restore.yml, which only runs when armed — so with
+# the flag down this block is skipped on both counts.
 - name: Restore MongoDB on a fresh deploy
   when:
+    - run_restore | bool
     - "'librechat-mongo.archive.gz' in staged_files"
     - mongo_data_pre.matched == 0
   block:
