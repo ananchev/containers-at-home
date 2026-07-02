@@ -2,7 +2,32 @@
 # docs-bridge server (MCP + REST), design §9/§15. Holds the baked INT8 bge-m3 (query
 # embed) + bge-reranker; talks to qdrant over the network (lazy-connect, so no startup
 # ordering dependency). Only mounts the rendered config + a writable cache dir (models
-# are baked, not mounted). Published host-local (LibreChat reaches it over the network).
+# are baked, not mounted). Published on the LAN interface (docs_bridge_bind_ip) so a
+# VPN-connected local Claude Code / opencode can reach /mcp; LibreChat still reaches it
+# over docs-bridge-net by container DNS (http://docs-bridge:8080/mcp), independent of
+# the published port.
+
+# Publishing on the LAN IP (not loopback) means the port must be open in the host's
+# firewall. Mirror the pre-requisites-podman approach: only act when firewalld runs,
+# and add both permanently (persist across reboot) and at runtime (effective now), so
+# no reload/handler is needed and the task is idempotent (ALREADY_ENABLED = no change).
+- name: Detect whether firewalld is running
+  ansible.builtin.command: firewall-cmd --state
+  register: db_firewalld_state
+  changed_when: false
+  failed_when: false
+
+- name: Open the docs-bridge server port in firewalld (persist + runtime)
+  when: db_firewalld_state.stdout == "running"
+  ansible.builtin.command:
+    cmd: "firewall-cmd {{ item }} --add-port={{ docs_bridge.server.port }}/tcp"
+  register: db_fw_port
+  changed_when: >-
+    'ALREADY_ENABLED' not in (db_fw_port.stdout | default(''))
+    and 'ALREADY_ENABLED' not in (db_fw_port.stderr | default(''))
+  loop:
+    - "--permanent"
+    - ""
 
 - name: Run the docs-bridge server
   community.docker.docker_container:
@@ -11,9 +36,15 @@
     network_mode: "{{ docker_network }}"
     env:
       DOCS_BRIDGE_CONFIG: /config/config.yaml
+      # LibreChat's token — it reads docs_bridge_secrets.bearer_token for its own MCP
+      # header, so keep it as the singular var (server accepts both; LibreChat unaffected).
       DOCS_BRIDGE_TOKEN: "{{ docs_bridge_secrets.bearer_token }}"
+      # Per-client tokens for local agents (vault dict name->secret), comma-joined. The
+      # server unions DOCS_BRIDGE_TOKENS with DOCS_BRIDGE_TOKEN; each is independently
+      # revocable by removing it from the vault. Empty when none defined (back-compat).
+      DOCS_BRIDGE_TOKENS: "{{ (docs_bridge_secrets.agent_tokens | default({})).values() | list | join(',') }}"
     ports:
-      - "127.0.0.1:{{ docs_bridge.server.port }}:{{ docs_bridge.server.port }}"
+      - "{{ docs_bridge_bind_ip }}:{{ docs_bridge.server.port }}:{{ docs_bridge.server.port }}"
     volumes:
       - "{{ config_file }}:/config/config.yaml:ro,z"
       - "{{ data_root }}/cache:/data/cache:z"

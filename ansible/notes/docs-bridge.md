@@ -117,6 +117,50 @@ librechat_secrets:
 `creds_key`/`creds_iv` MUST be exactly 32/16 bytes. The docs-bridge bearer is **reused** from
 `docs_bridge_secrets.bearer_token` (read only when `librechat_enable_mcp=true`).
 
+## Local coding agents (Claude Code / opencode)
+
+A local Claude Code / opencode can consume the server's `/mcp` tools (`search`,
+`list_subjects`) over the home **VPN** — LAN-only, no public edge. OpenRouter is only the
+agent's own model backend (configured in the client, unrelated to docs-bridge).
+
+**1. Mint a per-client token in the vault** (each client gets its own, individually
+revocable — the server unions these with the LibreChat bearer):
+
+```bash
+ansible-vault edit ansible/inventories/group_vars/all/vault.yml
+```
+```yaml
+docs_bridge_secrets:
+  bearer_token: "<existing — LibreChat>"
+  agent_tokens:                       # name -> secret, one per client
+    laptop: "<openssl rand -hex 32>"
+```
+
+**2. Rebuild the server image (new multi-token auth code) + apply the runtime changes.**
+The image builds from the pushed product repo, so push the docs-bridge change first, then:
+
+```bash
+./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K \
+  -e rebuild_images=true --tags prep,images,server
+```
+
+This publishes `8080` on the LAN IP (`docs_bridge_bind_ip`, default `192.168.2.199`;
+override to `0.0.0.0` if the VPN lands you on another subnet) and opens the firewalld
+port. The `server` task is declarative, so re-running is idempotent.
+
+**3. Verify from the laptop (on VPN)** — 200 with the token, 401 without:
+
+```bash
+curl -s http://192.168.2.199:8080/v1/subjects -H 'Authorization: Bearer <laptop-token>' | jq
+curl -s -o /dev/null -w '%{http_code}\n' http://192.168.2.199:8080/v1/subjects   # -> 401
+```
+
+**4. Wire the client** — see `docs/server.md` in the product repo for the exact Claude Code
+(`claude mcp add --transport http … --header`) and opencode (`opencode.json`) snippets.
+
+**Revoke** a client: remove its entry from `agent_tokens` and re-run step 2's tags (no
+`rebuild_images` needed — `--tags server` recreates the container with the new env).
+
 **Image pins** — add to vaulted `app_versions.yml` (pin exact tags once validated):
 ```yaml
 librechat:       { image: ghcr.io/danny-avila/librechat:latest }

@@ -7,6 +7,7 @@
   community.docker.docker_image:
     name: ingest-worker:latest
     source: build
+    force_source: "{{ rebuild_images | bool }}"   # -e rebuild_images=true after a code push
     build:
       path: "{{ source_path }}"
       dockerfile: images/ingest-worker/Dockerfile
@@ -16,6 +17,7 @@
   community.docker.docker_image:
     name: "{{ server_image }}"
     source: build
+    force_source: "{{ rebuild_images | bool }}"   # -e rebuild_images=true after a code push
     build:
       path: "{{ source_path }}"
       dockerfile: images/docs-bridge/Dockerfile

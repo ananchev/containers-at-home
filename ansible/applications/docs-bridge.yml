@@ -23,13 +23,16 @@
 # Runtime: Podman via its Docker-API socket (pre-requisites-podman.yml).
 # Image pin: app_versions['docs-bridge-qdrant'].image (vaulted app_versions.yml).
 # Secrets:   docs_bridge_secrets.bearer_token -> server DOCS_BRIDGE_TOKEN (+ the MCP
-#            header when librechat_enable_mcp); librechat_secrets.* (see notes).
+#            header when librechat_enable_mcp); docs_bridge_secrets.agent_tokens (dict
+#            name->secret) -> server DOCS_BRIDGE_TOKENS, one per local agent client
+#            (Claude Code / opencode), each independently revocable; librechat_secrets.*.
 #
 #   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K
 #   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e run_sync=true                 # + one-shot ingest
 #   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e run_restore=true               # opt-in restore (qdrant + manifest + mongo)
 #   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e librechat_enable_mcp=true      # 2.2: wire LibreChat->/mcp
 #   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e librechat_allow_registration=false  # close signups
+#   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e rebuild_images=true --tags prep,images,server  # rebuild server image + apply runtime changes
 - hosts: homelab
   become: true
   gather_facts: false
@@ -56,6 +59,16 @@
     qdrant_version: "{{ qdrant_image | regex_replace('^.*:', '') }}"    # e.g. v1.18.2
     qdrant_api: "http://127.0.0.1:6333"
     server_image: "{{ application }}:latest"   # docs-bridge:latest, built from source like ingest-worker
+    # Interface the server port is PUBLISHED on. 127.0.0.1 is host-local only; LibreChat
+    # never needed it (it reaches the server over docs-bridge-net by container DNS). Publish
+    # on the LAN IP so a VPN-connected local Claude Code / opencode can reach /mcp. Override
+    # to 0.0.0.0 (-e docs_bridge_bind_ip=0.0.0.0) if the VPN lands clients on another subnet;
+    # the firewalld rule in tasks/docs-bridge/server.yml still gates the port.
+    docs_bridge_bind_ip: "192.168.2.199"       # vhost2 LAN IP (== librechat_lan_ip)
+    # The two app images (ingest-worker, docs-bridge server) SKIP their build when already
+    # present (images.yml has no force_source). Arm this to force a rebuild after pushing a
+    # code change to the product repo: -e rebuild_images=true (layer cache still applies).
+    rebuild_images: false
     run_sync: false   # -e run_sync=true to trigger an ingest after deploy
     # Restore is OPT-IN. A normal deploy / container restart NEVER restores — it would
     # only ever fire on a genuinely fresh target anyway (the 404 / absent-manifest /
@@ -172,6 +185,15 @@
           description: >-
             Siemens Ecosys (EcoSys EPC) — enterprise project performance: project
             controls, cost management, scheduling and forecasting.
+        - name: polarion
+          dir: /data/docs/polarion
+          collection: polarion
+          description: >-
+            Siemens Polarion ALM — application lifecycle management: requirements
+            engineering, test management (QA), defect/issue tracking, and agile
+            project management. Covers server administration, LiveDocs, Work Items
+            configuration, Open API/REST development, and UI customization (Velocity
+            scripting, Widgets). Includes backend architecture details (e.g., Subversion/SVN).
 
     # Per-host deployment tuning — kept in this operator playbook on purpose:
     # NOT in host_vars (host facts only) and NOT in the product repo (the app
