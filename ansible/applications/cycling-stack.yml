@@ -21,6 +21,7 @@
         MCP_PROMPT_WRITES_ENABLED: "true"
         MCP_WRITABLE_PROMPTS: "all"
         MCP_PLAN_WRITES_ENABLED: "true"
+        MCP_CLOSE_BLOCK_ENABLED: "true"
         TELEGRAM_BOT_TOKEN: "{{ cycling_coach.telegram.bot_token }}"
         TELEGRAM_CHAT_ID: "{{ cycling_coach.telegram.chat_id }}"
         ANTHROPIC_API_KEY: "{{ cycling_coach.anthropic.api_key }}"
@@ -58,6 +59,7 @@
         MCP_PROMPT_WRITES_ENABLED: "true"
         MCP_WRITABLE_PROMPTS: "all"
         MCP_PLAN_WRITES_ENABLED: "true"
+        MCP_CLOSE_BLOCK_ENABLED: "true"
       mcp_auth_server:
         MCP_PUBLIC_URL: "{{ mcp_auth_server.public_url }}"
         MCP_HTTP_ADDR: ":8092"
@@ -215,9 +217,14 @@
           dest: "{{ item.source_path }}"
         loop: "{{ cycling_stack_apps | selectattr('repo', 'defined') | list }}"
 
+      # force_source rebuilds each deploy so freshly-cloned repo changes are
+      # picked up; without it docker_image SKIPS the build when an image with
+      # the same tag (e.g. cycling-coach:latest) already exists from a prior
+      # run. Docker's layer cache still makes unchanged layers fast.
       - name: Build images without custom Dockerfiles
         community.docker.docker_image:
           source: build
+          force_source: true
           build:
             path: "{{ item.build.path }}"
             rm: true
@@ -227,6 +234,7 @@
       - name: Build images with custom Dockerfiles
         community.docker.docker_image:
           source: build
+          force_source: true
           build:
             path: "{{ item.build.path }}"
             dockerfile: "{{ item.build.dockerfile }}"
