@@ -119,6 +119,9 @@ docker exec zfs-manager borg info \
   "ssh://<borg_remote_user>@<borg_remote_host>/backups-pool/containers-backup::$(date +%Y-%m-%d)"
 ```
 
+**Backup integrity audit**
+The node→ZFS mirror (`take_backups.yml`'s rsync) never deletes files, so an app removed/renamed in `backup_definitions.yml` leaves an orphaned directory that gets re-snapshotted forever — ZFS/Unraid retention won't clean it up since retention only expires whole dated snapshots, not stale content inside the live dataset. See `notes/containers-backup.md` for the full explanation and the nightly `backup-audit` script (on `unas`, not in this repo) that watches for this along with checksum/staleness drift.
+
 **Remote ZFS snapshot (borg host)**
 After all borg backups complete, the a ZFS snapshot is created of the `backups-pool` dataset. 
 Any old snapshots are cleand using the `ZFS_RETENTION_DAYS` value as for the local ZFS retention.

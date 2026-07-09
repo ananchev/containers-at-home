@@ -25,6 +25,7 @@
 - name: Copy backup files from container to host machine
   ansible.builtin.shell: |
     docker cp {{ container }}:{{ copy_action.source_path }} "{{ backup_destination }}/{{ copy_action.target_filename }}"
+    touch "{{ backup_destination }}/{{ copy_action.target_filename }}"
   args:
     executable: /bin/sh
   loop: "{{ copy_actions }}"
