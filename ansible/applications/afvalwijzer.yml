@@ -23,11 +23,30 @@
               repo: 'https://github.com/ananchev/afvalwijzer.git' 
               dest: "{{ host_directory }}/source"
 
+        # force: false -- only create if missing. Without this, every redeploy
+        # would both wipe the log's history AND hit a real bug: once the
+        # SELinux config step below has run once, this file carries a custom
+        # afvalwijzer_t label, and ansible.builtin.copy's atomic_move tries to
+        # preserve that context onto its temp file before renaming -- which
+        # then fails chmod (Permission Denied) because the custom policy
+        # doesn't grant that to a temp file sitting outside its expected path.
         - name: Initiate empty log file
           ansible.builtin.copy:
             content: ""
             dest: "{{ host_directory }}/afvalwijzer.log"
             mode: '0644'
+            force: false
+
+        # Removed first (rather than force: false above) because this one
+        # DOES need fresh content every deploy -- once the SELinux config step
+        # below has labeled it afvalwijzer_t, ansible.builtin.copy overwriting
+        # it in place hits the same atomic_move/chmod bug explained above.
+        # Deleting first means copy creates a fresh file (default type for
+        # this path) instead of preserving the stale custom label.
+        - name: Remove existing telegram-send.conf before rewriting
+          ansible.builtin.file:
+            path: "{{ host_directory }}/source/telegram-send.conf"
+            state: absent
 
         - name: Create telegram-send.conf
           ansible.builtin.copy:
