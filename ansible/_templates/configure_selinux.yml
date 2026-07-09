@@ -1,22 +1,37 @@
 
+# Not every host that includes this file has SELinux at all (e.g. unas is
+# Unraid/Slackware-based -- no checkmodule/semodule ever). Detected at
+# runtime rather than via the ansible_selinux fact because most callers of
+# this file run with gather_facts: false, so that fact is never populated
+# even on hosts (like pi5) where SELinux genuinely is enforcing.
+- name: Check whether SELinux tooling is available
+  ansible.builtin.command: which checkmodule
+  register: selinux_tooling_check
+  changed_when: false
+  failed_when: false
+
 - name: Create custom SELinux policy module file
   ansible.builtin.template:
     src: selinux_policy.j2
     dest: /tmp/{{ container_name }}.te
+  when: selinux_tooling_check.rc == 0
 
 - name: Compile custom SELinux policy
   command: checkmodule -M -m -o /tmp/{{ container_name }}.mod /tmp/{{ container_name }}.te
   args:
     creates: /tmp/{{ container_name }}.mod
+  when: selinux_tooling_check.rc == 0
 
 - name: Create custom policy package
   command: semodule_package -o /tmp/{{ container_name }}.pp -m /tmp/{{ container_name }}.mod
   args:
     creates: /tmp/{{ container_name }}.pp
+  when: selinux_tooling_check.rc == 0
 
 - name: Install custom SELinux policy
   ansible.builtin.command:
     cmd: semodule -i /tmp/{{ container_name }}.pp
+  when: selinux_tooling_check.rc == 0
 
 - name: Apply custom SELinux label to file
   ansible.builtin.file:
@@ -26,7 +41,7 @@
     seuser: system_u
     selevel: s0
   loop: "{{ selinux_files_to_label | default([]) }}"
-  when: selinux_files_to_label is defined and selinux_files_to_label
+  when: selinux_tooling_check.rc == 0 and selinux_files_to_label is defined and selinux_files_to_label
 
 - name: Apply custom SELinux label to directory
   ansible.builtin.file:
@@ -37,4 +52,4 @@
     selevel: s0
     recurse: true
   loop: "{{ selinux_dirs_to_label|default([]) }}"
-  when: selinux_dirs_to_label is defined and selinux_dirs_to_label
+  when: selinux_tooling_check.rc == 0 and selinux_dirs_to_label is defined and selinux_dirs_to_label
