@@ -3,6 +3,12 @@ backup_definitions:
   # re-ingestable source, kept elsewhere). One readable script, three steps. Run
   # host-side because the data is on bind mounts and the ingest-worker is one-shot.
   # Restore is in the deploy playbook (snapshot upload API + manifest untar).
+  #
+  # docs_bridge_data_root below needs `| default('')`: ansible-core fully
+  # renders this whole backup_definitions list (every host_commands string,
+  # every item) before take_backups.yml's per-item `when` filters anything, so
+  # hosts without this var defined (anything but vhost2) would otherwise crash
+  # here even though this item never actually runs on them.
   - application: docs-bridge
     container: qdrant
     backup_commands: []
@@ -22,11 +28,11 @@ backup_definitions:
         done
 
         # 2. SQLite manifest (lets a restored host skip re-embedding).
-        tar -czf "$dest/state.tar.gz" -C {{ docs_bridge_data_root }}/state .
+        tar -czf "$dest/state.tar.gz" -C {{ docs_bridge_data_root | default('') }}/state .
 
         # 3. Index of the source docs (sha256<TAB>bytes<TAB>relpath) so a restored
         #    collection can be traced back to its files. The docs are not backed up.
-        docs={{ docs_bridge_data_root }}/docs
+        docs={{ docs_bridge_data_root | default('') }}/docs
         if [ -d "$docs" ]; then
           cd "$docs"
           find . -type f | LC_ALL=C sort | while IFS= read -r f; do
@@ -53,16 +59,22 @@ backup_definitions:
       - source_path: /tmp/backup.tar.gz
         target_filename: backup.tar.gz
   
-  - application: guacamole
-    container: guacamole-postgres
-    backup_commands:
-      - pg_dumpall -U postgres --globals-only -f /tmp/postgres_globals.sql
-      - pg_dump -U postgres -F p -f /tmp/guacamole_db.sql guacamole_db
-    copy_actions:
-      - source_path: /tmp/postgres_globals.sql
-        target_filename: postgres_globals.sql
-      - source_path: /tmp/guacamole_db.sql
-        target_filename: guacamole_db.sql
+  # guacamole stack torn down 2026-06-22, to be rebuilt later -- last backup
+  # (2026-06-22) is deliberately kept on the ZFS mirror and excluded from the
+  # backup-audit staleness check (see notes/containers-backup.md). Commented
+  # out rather than left active because guacamole-postgres not existing makes
+  # docker_container_exec hard-fail the whole host's remaining backup loop.
+  # Re-enable once guacamole is redeployed.
+  # - application: guacamole
+  #   container: guacamole-postgres
+  #   backup_commands:
+  #     - pg_dumpall -U postgres --globals-only -f /tmp/postgres_globals.sql
+  #     - pg_dump -U postgres -F p -f /tmp/guacamole_db.sql guacamole_db
+  #   copy_actions:
+  #     - source_path: /tmp/postgres_globals.sql
+  #       target_filename: postgres_globals.sql
+  #     - source_path: /tmp/guacamole_db.sql
+  #       target_filename: guacamole_db.sql
 
   - application: authelia
     container: authelia
