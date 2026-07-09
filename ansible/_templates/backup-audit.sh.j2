@@ -1,0 +1,276 @@
+#!/bin/bash
+
+# --- CONFIGURATION ---
+ZFS_SNAP_PATH="{{ script_vars.zfs_backup_path }}/.zfs/snapshot/auto-daily-$(date +%Y-%m-%d)"
+UNRAID_PATH="{{ script_vars.unraid_array_path }}/$(date +%Y-%m-%d)"
+HOSTNAME=$(hostname)
+BACKUP_DATE=$(basename "$UNRAID_PATH")
+
+# Format as YYYY-MM-DD for readability
+if [[ "$BACKUP_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    BACKUP_DATE_FORMATTED=$(date -d "$BACKUP_DATE" "+%d %B %Y" 2>/dev/null || echo "$BACKUP_DATE")
+else
+    BACKUP_DATE_FORMATTED="$BACKUP_DATE"
+fi
+
+# Hardcode DEBUG_MODE/SEND_TELEGRAM since User Scripts does not support UI
+# arguments. Token/chat ID come from vault.yml (rendered at deploy time) --
+# never hardcode these here, this file is git-tracked.
+DEBUG_MODE=false
+SEND_TELEGRAM=true
+TELEGRAM_TOKEN="{{ home_notifier_telegram_token }}"
+CHAT_ID="{{ home_notifier_telegram_chat_id }}"
+
+# Apps whose backups are intentionally frozen (stack torn down but you plan to
+# rebuild it, so the last backup must be kept rather than left to rotate out)
+# get excluded from the staleness check ONLY -- every other check (checksum,
+# size, existence, hollow-folder) still runs against them, so you'd still get
+# alerted if the backup you're relying on to restore later got corrupted or
+# deleted. Match against the app's top-level dir name under containers-backup/
+# (same name as in application_services.yml). See notes/containers-backup.md
+# for the full design rationale.
+EXCLUDE_STALE=("guacamole")
+
+# Comment out the argument parsing
+# while [[ $# -gt 0 ]]; do
+#     case $1 in
+#         --debug|-d)
+#             DEBUG_MODE=true
+#             shift
+#             ;;
+#         --telegram|-t)
+#             SEND_TELEGRAM=true
+#             if [ -z "$2" ] || [[ "$2" == -* ]]; then
+#                 echo "Error: --telegram requires TELEGRAM_TOKEN and CHAT_ID"
+#                 exit 1
+#             fi
+#             TELEGRAM_TOKEN="$2"
+#             if [ -z "$3" ] || [[ "$3" == -* ]]; then
+#                 echo "Error: --telegram requires both TELEGRAM_TOKEN and CHAT_ID"
+#                 exit 1
+#             fi
+#             CHAT_ID="$3"
+#             shift 3
+#             ;;
+#         --help|-h)
+#             echo "Usage: $0 [OPTIONS]"
+#             echo ""
+#             echo "Options:"
+#             echo "  --debug, -d                    Enable verbose output and save logs"
+#             echo "  --telegram, -t TOKEN CHAT_ID   Send notification to Telegram"
+#             echo "  --help, -h                     Show this help message"
+#             exit 0
+#             ;;
+#         *)
+#             echo "Unknown option: $1"
+#             exit 1
+#             ;;
+#     esac
+# done
+
+# Setup work directory and output redirection
+WORK_DIR="/tmp/backup-audit-$$"
+mkdir -p "$WORK_DIR"
+if [ "$DEBUG_MODE" = false ]; then
+    trap "rm -rf '$WORK_DIR'" EXIT
+fi
+
+if [ "$DEBUG_MODE" = true ]; then
+    exec 3>&1
+else
+    exec 3>/dev/null
+fi
+
+# --- TELEGRAM FUNCTION ---
+send_telegram() {
+    local message="$1"
+    curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
+        -d "chat_id=$CHAT_ID" \
+        -d "parse_mode=HTML" \
+        -d "text=<b>$HOSTNAME backup audit for $BACKUP_DATE_FORMATTED</b>%0A$message" > /dev/null
+}
+
+# --- HEADER ---
+{
+    echo "=============================================="
+    echo "  BACKUP INTEGRITY AUDIT"
+    echo "  Host: $HOSTNAME"
+    echo "  Date: $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "=============================================="
+    echo
+} >&3
+
+# --- 1. PRE-FLIGHT CHECKS ---
+echo "[1/6] Pre-flight checks..." >&3
+if [ ! -d "$ZFS_SNAP_PATH" ]; then
+    ERROR_MSG="<b>🔴 CRITICAL</b>%0A---%0AZFS snapshot missing! Path: $ZFS_SNAP_PATH"
+    echo "$ERROR_MSG" >&2
+    [ "$SEND_TELEGRAM" = true ] && send_telegram "$ERROR_MSG"
+    exit 1
+fi
+if [ ! -d "$UNRAID_PATH" ]; then
+    ERROR_MSG="<b>🔴 CRITICAL</b>%0A---%0AUnraid backup path missing! Path: $UNRAID_PATH"
+    echo "$ERROR_MSG" >&2
+    [ "$SEND_TELEGRAM" = true ] && send_telegram "$ERROR_MSG"
+    exit 1
+fi
+echo "OK: Source and Target paths found." >&3
+
+# --- 2. SOURCE AUDIT (ZFS-TO-ZFS) ---
+echo "[2/6] Auditing ZFS Source Structural Integrity..." >&3
+
+# A. Trend Check
+YESTERDAY_SNAP="{{ script_vars.zfs_backup_path }}/.zfs/snapshot/auto-daily-$(date -d 'yesterday' +%Y-%m-%d)"
+VANISHED_APPS=""
+VANISHED_COUNT=0
+if [ -d "$YESTERDAY_SNAP" ]; then
+    ls -1 "$YESTERDAY_SNAP" | grep -v ".status" | sort > "$WORK_DIR/prev_zfs_apps.txt"
+    ls -1 "$ZFS_SNAP_PATH" | grep -v ".status" | sort > "$WORK_DIR/curr_zfs_apps.txt"
+    VANISHED_APPS=$(comm -23 "$WORK_DIR/prev_zfs_apps.txt" "$WORK_DIR/curr_zfs_apps.txt")
+    VANISHED_COUNT=$(echo -n "$VANISHED_APPS" | grep -c '^' || echo 0)
+    if [ "$VANISHED_COUNT" -gt 0 ]; then
+        echo "WARNING: $VANISHED_COUNT app(s) missing from ZFS vs yesterday!" >&3
+        echo "$VANISHED_APPS" | sed 's/^/      - /' >&3
+    fi
+fi
+
+# B. Hollow Folder Check
+EMPTY_ZFS_APPS=""
+EMPTY_ZFS_COUNT=0
+while read -r app_dir; do
+    F_COUNT=$(find "$app_dir" -type f | wc -l)
+    if [ "$F_COUNT" -eq 0 ]; then
+        A_NAME=$(basename "$app_dir")
+        EMPTY_ZFS_APPS="$EMPTY_ZFS_APPS $A_NAME"
+        ((EMPTY_ZFS_COUNT++))
+    fi
+done < <(find "$ZFS_SNAP_PATH" -mindepth 1 -maxdepth 1 -type d -not -name ".status")
+if [ "$EMPTY_ZFS_COUNT" -gt 0 ]; then
+    echo "WARNING: Found $EMPTY_ZFS_COUNT hollow folders in ZFS!" >&3
+    echo "$EMPTY_ZFS_APPS" | tr ' ' '\n' | sed 's/^/      - /' >&3
+fi
+
+# C. Zero-Size File Check (Moved to Source)
+find "$ZFS_SNAP_PATH" -type f -not -path '*/.status/*' -size 0 > "$WORK_DIR/zero_size_files.txt"
+ZERO_SIZE_COUNT=$(wc -l < "$WORK_DIR/zero_size_files.txt")
+if [ "$ZERO_SIZE_COUNT" -gt 0 ]; then
+    echo "WARNING: Found $ZERO_SIZE_COUNT zero-size files in ZFS Source:" >&3
+    sed "s|$ZFS_SNAP_PATH/|      - |" "$WORK_DIR/zero_size_files.txt" >&3
+fi
+
+[ "$VANISHED_COUNT" -eq 0 ] && [ "$EMPTY_ZFS_COUNT" -eq 0 ] && [ "$ZERO_SIZE_COUNT" -eq 0 ] && echo "OK: ZFS Source structure is healthy." >&3
+echo >&3
+
+# --- 3. COMPLETENESS CHECK ---
+echo "[3/6] Counting files (ZFS vs Unraid)..." >&3
+find "$ZFS_SNAP_PATH" -type f -not -path '*/.status/*' | sort > "$WORK_DIR/zfs_files.txt"
+ZFS_COUNT=$(wc -l < "$WORK_DIR/zfs_files.txt")
+find "$UNRAID_PATH" -type f -not -path '*/.status/*' | sort > "$WORK_DIR/unraid_files.txt"
+UNRAID_COUNT=$(wc -l < "$WORK_DIR/unraid_files.txt")
+
+if [ "$ZFS_COUNT" -eq "$UNRAID_COUNT" ]; then
+    echo "OK: File count matches ($UNRAID_COUNT)" >&3
+else
+    echo "MISMATCH: Source has $ZFS_COUNT, Target has $UNRAID_COUNT" >&3
+    sed "s|$ZFS_SNAP_PATH/||" "$WORK_DIR/zfs_files.txt" | sort > "$WORK_DIR/zfs_files_rel.txt"
+    sed "s|$UNRAID_PATH/||" "$WORK_DIR/unraid_files.txt" | sort > "$WORK_DIR/unraid_files_rel.txt"
+    comm -23 "$WORK_DIR/zfs_files_rel.txt" "$WORK_DIR/unraid_files_rel.txt" | sed 's/^/  ONLY IN ZFS: /' >&3
+    comm -13 "$WORK_DIR/zfs_files_rel.txt" "$WORK_DIR/unraid_files_rel.txt" | sed 's/^/  ONLY IN UNRAID: /' >&3
+fi
+echo >&3
+
+# --- 4. SIZE COMPARISON ---
+echo "[4/6] Checking sizes..." >&3
+ZFS_SIZE=$(du -sh "$ZFS_SNAP_PATH" 2>/dev/null | cut -f1)
+UNRAID_SIZE=$(du -sh "$UNRAID_PATH" 2>/dev/null | cut -f1)
+echo "OK: ZFS: $ZFS_SIZE | Unraid: $UNRAID_SIZE" >&3
+echo >&3
+
+# --- 5. INTEGRITY CHECK (SHA256) ---
+echo "[5/6] Verifying Checksums..." >&3
+cd "$ZFS_SNAP_PATH" || exit 1
+find . -type f -not -path '*/.status/*' -print0 | xargs -0 -P "$(nproc)" -n 50 sha256sum > "$WORK_DIR/manifest.txt" 2>&1
+cd "$UNRAID_PATH" || exit 1
+sha256sum --quiet -c "$WORK_DIR/manifest.txt" 2>&1 | grep "FAILED" > "$WORK_DIR/failed.txt"
+ERROR_COUNT=$(wc -l < "$WORK_DIR/failed.txt")
+if [ "$ERROR_COUNT" -gt 0 ]; then
+    echo "CRITICAL: $ERROR_COUNT checksum failures detected:" >&3
+    sed 's/^/      - /' "$WORK_DIR/failed.txt" >&3
+else
+    echo "OK: All checksums verified successfully." >&3
+fi
+echo >&3
+
+# --- 6. STALENESS CHECK ---
+echo "[6/6] Checking for stale files..." >&3
+find "$ZFS_SNAP_PATH" -type f -not -path '*/.status/*' -mtime +1 > "$WORK_DIR/stale_files_raw.txt"
+if [ ${#EXCLUDE_STALE[@]} -gt 0 ]; then
+    EXCLUDE_REGEX=$(printf '%s\n' "${EXCLUDE_STALE[@]}" | sed "s|^|$ZFS_SNAP_PATH/|" | paste -sd'|')
+    grep -Ev "^($EXCLUDE_REGEX)/" "$WORK_DIR/stale_files_raw.txt" > "$WORK_DIR/stale_files.txt"
+else
+    cp "$WORK_DIR/stale_files_raw.txt" "$WORK_DIR/stale_files.txt"
+fi
+STALE_FILES=$(wc -l < "$WORK_DIR/stale_files.txt")
+if [ "$STALE_FILES" -gt 0 ]; then
+    echo "INFO: $STALE_FILES files are older than 24h." >&3
+else
+    echo "OK: All files are current (under 24h old)." >&3
+fi
+echo >&3
+
+# --- 7. OVERALL STATUS ---
+if [ "$ERROR_COUNT" -eq 0 ] && [ "$ZFS_COUNT" -eq "$UNRAID_COUNT" ]; then
+    if [ "$STALE_FILES" -gt 0 ] || [ "$ZERO_SIZE_COUNT" -gt 0 ] || [ "$VANISHED_COUNT" -gt 0 ] || [ "$EMPTY_ZFS_COUNT" -gt 0 ]; then
+        OVERALL_STATUS="🟠 WARNING"
+    else
+        OVERALL_STATUS="🟢 SUCCESS"
+    fi
+    EXIT_CODE=0
+else
+    OVERALL_STATUS="🔴 FAILED"
+    EXIT_CODE=1
+fi
+
+# --- FINAL SUMMARY (CONSOLE & DEBUG) ---
+SUMMARY_BLOCK="Status: $OVERALL_STATUS
+Source: Vanished: $VANISHED_COUNT | Hollow: $EMPTY_ZFS_COUNT | Zero: $ZERO_SIZE_COUNT
+Sync:   Files: $UNRAID_COUNT/$ZFS_COUNT | Integrity: $([ "$ERROR_COUNT" -eq 0 ] && echo "100%" || echo "FAILED")"
+
+{
+    echo "=============================================="
+    echo "  $BACKUP_DATE_FORMATTED AUDIT SUMMARY"
+    echo "=============================================="
+    echo "$SUMMARY_BLOCK"
+    echo "=============================================="
+    if [ "$DEBUG_MODE" = true ]; then
+        echo "Debug logs saved to: $WORK_DIR"
+        echo "=============================================="
+    fi
+} >&3
+
+if [ "$DEBUG_MODE" = false ] && [ "$SEND_TELEGRAM" = false ]; then
+    echo "=============================================="
+    echo " $BACKUP_DATE_FORMATTED BACKUP AUDIT SUMMARY"
+    echo "=============================================="
+    echo "$SUMMARY_BLOCK"
+    echo "=============================================="
+fi
+
+# --- SEND TELEGRAM ---
+if [ "$SEND_TELEGRAM" = true ]; then
+    TELEGRAM_MSG="<b>$OVERALL_STATUS</b>%0A---%0A"
+    [ "$VANISHED_COUNT" -gt 0 ] && TELEGRAM_MSG="${TELEGRAM_MSG}Missing vs Yesterday: $VANISHED_COUNT apps%0A"
+    [ "$EMPTY_ZFS_COUNT" -gt 0 ] && TELEGRAM_MSG="${TELEGRAM_MSG}Hollow Source Dirs: $EMPTY_ZFS_COUNT%0A<code>$EMPTY_ZFS_APPS</code>%0A"
+    [ "$ZERO_SIZE_COUNT" -gt 0 ] && TELEGRAM_MSG="${TELEGRAM_MSG}Zero-Size in Source: $ZERO_SIZE_COUNT%0A"
+    TELEGRAM_MSG="${TELEGRAM_MSG}Files: $UNRAID_COUNT/$ZFS_COUNT%0A"
+    if [ "$ERROR_COUNT" -gt 0 ]; then
+        TELEGRAM_MSG="${TELEGRAM_MSG}Integrity: FAILED ($ERROR_COUNT errors)%0A"
+    else
+        TELEGRAM_MSG="${TELEGRAM_MSG}Integrity: 100%%0A"
+    fi
+    [ "$STALE_FILES" -gt 0 ] && TELEGRAM_MSG="${TELEGRAM_MSG}Stale: $STALE_FILES files%0A"
+    TELEGRAM_MSG="${TELEGRAM_MSG}Size: $ZFS_SIZE"
+    send_telegram "$TELEGRAM_MSG"
+fi
+
+exit $EXIT_CODE

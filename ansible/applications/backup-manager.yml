@@ -136,3 +136,17 @@
         ansible.builtin.command: docker system prune -af
 
       when: inventory_hostname in application_services['backup-manager'].hosts
+
+    # backup-audit is an Unraid User Scripts plugin script (not a container),
+    # so it only exists on unas, not on the vm dev/test host that also runs
+    # backup-manager -- hence its own separate when, not reused from the block
+    # above. Only the script CONTENT is Ansible-managed here; the cron
+    # schedule stays a manual Unraid UI action (User Scripts generates
+    # /etc/cron.d/root itself from its own state, so Ansible fighting over
+    # that file would just get overwritten by the plugin).
+    - name: Deploy the backup-audit script to Unraid's User Scripts plugin
+      ansible.builtin.template:
+        src: ../_templates/backup-audit.sh.j2
+        dest: /boot/config/plugins/user.scripts/scripts/backup-audit/script
+        mode: '0755'
+      when: inventory_hostname == 'unas'
