@@ -204,7 +204,7 @@ echo >&3
 # --- 6. STALENESS CHECK ---
 echo "[6/6] Checking for stale files..." >&3
 find "$ZFS_SNAP_PATH" -type f -not -path '*/.status/*' -mtime +1 > "$WORK_DIR/stale_files_raw.txt"
-if [ ${#EXCLUDE_STALE[@]} -gt 0 ]; then
+if [ {% raw %}${#EXCLUDE_STALE[@]}{% endraw %} -gt 0 ]; then
     EXCLUDE_REGEX=$(printf '%s\n' "${EXCLUDE_STALE[@]}" | sed "s|^|$ZFS_SNAP_PATH/|" | paste -sd'|')
     grep -Ev "^($EXCLUDE_REGEX)/" "$WORK_DIR/stale_files_raw.txt" > "$WORK_DIR/stale_files.txt"
 else
