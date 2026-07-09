@@ -42,13 +42,14 @@
           ansible.builtin.include_tasks:
             file: ../_templates/configure_selinux.yml
 
-        - name: Build the afvalwijzer image 
+        - name: Build the afvalwijzer image
           community.docker.docker_image:
             source: build
             build:
               path: "{{ host_directory }}/source"
               rm: true
             name: afvalwijzer:latest
+            force_source: true
 
         - name: Cleanup the non-tagged images
           ansible.builtin.command: docker image prune -f
