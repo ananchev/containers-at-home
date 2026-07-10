@@ -83,7 +83,7 @@ else
     
     # Sync from the "Frozen" snapshot, not the "Live" data
     # This prevents data corruption if a node syncs during this process
-    rsync -a --info=progress2 --exclude "/.status/" "$ZFS_BACKUP_PATH/.status/" "$SNAPSHOT_SRC/" "$UNRAID_TARGET_DIR/"
+    rsync -a --info=progress2 --exclude "/.status/" "$SNAPSHOT_SRC/" "$UNRAID_TARGET_DIR/"
     
     echo "Snapshot successfully archived to: $UNRAID_TARGET_DIR"
 fi

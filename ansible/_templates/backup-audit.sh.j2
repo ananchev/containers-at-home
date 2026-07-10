@@ -127,7 +127,7 @@ if [ -d "$YESTERDAY_SNAP" ]; then
     ls -1 "$YESTERDAY_SNAP" | grep -v ".status" | sort > "$WORK_DIR/prev_zfs_apps.txt"
     ls -1 "$ZFS_SNAP_PATH" | grep -v ".status" | sort > "$WORK_DIR/curr_zfs_apps.txt"
     VANISHED_APPS=$(comm -23 "$WORK_DIR/prev_zfs_apps.txt" "$WORK_DIR/curr_zfs_apps.txt")
-    VANISHED_COUNT=$(echo -n "$VANISHED_APPS" | grep -c '^' || echo 0)
+    VANISHED_COUNT=$(echo -n "$VANISHED_APPS" | grep -c '^')
     if [ "$VANISHED_COUNT" -gt 0 ]; then
         echo "WARNING: $VANISHED_COUNT app(s) missing from ZFS vs yesterday!" >&3
         echo "$VANISHED_APPS" | sed 's/^/      - /' >&3
