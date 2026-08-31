@@ -59,6 +59,18 @@
     qdrant_version: "{{ qdrant_image | regex_replace('^.*:', '') }}"    # e.g. v1.18.2
     qdrant_api: "http://127.0.0.1:6333"
     server_image: "{{ application }}:latest"   # docs-bridge:latest, built from source like ingest-worker
+    # The worker image is referenced FULLY QUALIFIED everywhere (build, on-demand ingest,
+    # systemd timer). Podman runs short-name-mode="enforcing": an unqualified
+    # `ingest-worker:latest` that is not in local storage goes down the PULL path, wants
+    # to prompt for a registry, and with no TTY exits 125 with "short-name resolution
+    # enforced but cannot prompt without a TTY". That killed the nightly ingest timer
+    # silently from 2026-07-09 to 2026-08-31 (56 failed runs — it fires, dies in a
+    # second, and only journald notices). `localhost/` is podman's namespace for built
+    # images, so the reference can never be read as a remote one.
+    # NOTE server_image above has the same latent exposure; it is left short until the
+    # server image is next rebuilt, since changing the tag forces a rebuild (that image
+    # bakes the INT8 embedder + reranker, so it is not a cheap one).
+    worker_image: "localhost/ingest-worker:latest"
     # Interface the server port is PUBLISHED on. 127.0.0.1 is host-local only; LibreChat
     # never needed it (it reaches the server over docs-bridge-net by container DNS). Publish
     # on the LAN IP so a VPN-connected local Claude Code / opencode can reach /mcp. Override

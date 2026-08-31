@@ -15,7 +15,7 @@
     -v {{ data_root }}/state:{{ container_data_root }}/state:z
     -v {{ data_root }}/cache:{{ container_data_root }}/cache:z
     -v {{ config_file }}:/config/config.yaml:ro,z
-    ingest-worker:latest sync --subject all --verbose
+    {{ worker_image }} sync --subject all --verbose
   register: ingest_run
   changed_when: true
 

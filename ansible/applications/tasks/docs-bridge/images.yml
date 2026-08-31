@@ -5,7 +5,9 @@
 
 - name: Build the ingest-worker image
   community.docker.docker_image:
-    name: ingest-worker:latest
+    # Fully qualified (localhost/) so podman's enforcing short-name mode never sends a
+    # `run` of this image down the pull path — see worker_image in the master playbook.
+    name: "{{ worker_image }}"
     source: build
     force_source: "{{ rebuild_images | bool }}"   # -e rebuild_images=true after a code push
     build:
