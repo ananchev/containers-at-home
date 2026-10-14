@@ -40,7 +40,7 @@
   ansible.builtin.git:
     repo: "{{ repo }}"
     dest: "{{ source_path }}"
-    version: main
+    version: "{{ docs_bridge_ref | default('mac-mini') }}"   # product branch; override with -e docs_bridge_ref=...
 
 - name: Render ingest config.yaml from the config contract
   ansible.builtin.template:
