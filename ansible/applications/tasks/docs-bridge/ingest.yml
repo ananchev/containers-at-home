@@ -11,11 +11,12 @@
   ansible.builtin.command: >
     docker run --rm
     --network {{ docker_network }}
+    --memory {{ docs_bridge_worker_mem }} --memory-swap {{ docs_bridge_worker_mem }}
     -v {{ data_root }}/docs:{{ container_data_root }}/docs:ro,z
     -v {{ data_root }}/state:{{ container_data_root }}/state:z
     -v {{ data_root }}/cache:{{ container_data_root }}/cache:z
     -v {{ config_file }}:/config/config.yaml:ro,z
-    {{ worker_image }} sync --subject all --verbose
+    {{ worker_image }} sync --subject all
   register: ingest_run
   changed_when: true
 

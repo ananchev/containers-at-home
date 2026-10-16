@@ -58,7 +58,14 @@
     qdrant_image: "{{ app_versions[application + '-qdrant'].image }}"   # e.g. qdrant/qdrant:v1.18.2
     qdrant_version: "{{ qdrant_image | regex_replace('^.*:', '') }}"    # e.g. v1.18.2
     qdrant_api: "http://127.0.0.1:6333"
-    server_image: "{{ application }}:latest"   # docs-bridge:latest, built from source like ingest-worker
+    # Both app images are the ones built and gated on vhost2 in the Phase A rebuild
+    # (docs-bridge repo, branch mac-mini, tools/phase-a/1-build.sh): images.yml finds
+    # them present and SKIPS the build, so production runs exactly the tested bytes.
+    # A new tag = a deliberate rebuild (bump both, then -e rebuild_images is not needed).
+    # Rollback: the previous images stay as docker.io/library/docs-bridge:latest and
+    # localhost/ingest-worker:latest (old embedder runtime, old manifest + collections).
+    docs_bridge_image_tag: "2026.10-macmini"
+    server_image: "localhost/docs-bridge:{{ docs_bridge_image_tag }}"
     # The worker image is referenced FULLY QUALIFIED everywhere (build, on-demand ingest,
     # systemd timer). Podman runs short-name-mode="enforcing": an unqualified
     # `ingest-worker:latest` that is not in local storage goes down the PULL path, wants
@@ -67,10 +74,13 @@
     # silently from 2026-07-09 to 2026-08-31 (56 failed runs — it fires, dies in a
     # second, and only journald notices). `localhost/` is podman's namespace for built
     # images, so the reference can never be read as a remote one.
-    # NOTE server_image above has the same latent exposure; it is left short until the
-    # server image is next rebuilt, since changing the tag forces a rebuild (that image
-    # bakes the INT8 embedder + reranker, so it is not a cheap one).
-    worker_image: "localhost/ingest-worker:latest"
+    # server_image above is fully qualified too since the 2026.10 rebuild.
+    worker_image: "localhost/ingest-worker:{{ docs_bridge_image_tag }}"
+    # Memory cap for every ingest-worker run (timer + on-demand). It shares 16 GB with the
+    # live server (4.4-7 GB), Qdrant and LibreChat; without a cap a runaway parse pushed
+    # the host into swap and the kernel OOM killer (2026-10-15). With batch 32 + the
+    # embedder's token budget the worker peaks at ~5.5 GB parsing, ~3.7 GB embedding.
+    docs_bridge_worker_mem: 7g
     # Interface the server port is PUBLISHED on. 127.0.0.1 is host-local only; LibreChat
     # never needed it (it reaches the server over docs-bridge-net by container DNS). Publish
     # on the LAN IP so a VPN-connected local Claude Code / opencode can reach /mcp. Override
@@ -139,7 +149,9 @@
         port: 6333
       ingest:
         two_pass: true
-      manifest_path: /data/state/manifest.sqlite
+      # Subject-keyed schema (docs-bridge 2026.10): the worker refuses the old
+      # manifest.sqlite (LegacyManifestError), which stays on disk for rollback only.
+      manifest_path: /data/state/manifest-subject-keyed.sqlite
       # docs-bridge SERVER only (the ingest-worker parses these but ignores them).
       # model_dir is the path baked into the docs-bridge image.
       rerank:
@@ -183,29 +195,48 @@
       # NOT by splitting — so AIG lives inside `teamcenter` (it runs on/through TC).
       # Relationships are encoded in the descriptions (the model's routing signal).
       subjects:
-        - name: teamcenter
-          dir: /data/docs/teamcenter
-          collection: teamcenter
+        # Teamcenter is split BY VERSION since 2026.10 (one subject + collection per
+        # release, plus the cross-release What's New guides), so a caller can ask for
+        # one version or several; identical passages across versions come back merged
+        # (result fields `subjects` / `also_in`). Collections are NEW (re-parsed with
+        # docling 2.130 + fonts, subject-keyed ids); the old `teamcenter` collection
+        # is kept, unserved, for the rollback window.
+        - name: teamcenter-2512
+          dir: /data/docs/teamcenter-2512
+          collection: teamcenter_2512
           description: >-
-            Siemens Teamcenter PLM — installation, configuration, administration,
-            server/client APIs, SOA & ITK development and customization, and the
-            Active Integration Gateway (T4S/T4O) for SAP integration (AIG runs on and
-            is configured through Teamcenter, so AIG/install/config topics live here).
-        - name: ecosys
-          dir: /data/docs/ecosys
-          collection: ecosys
+            Siemens Teamcenter PLM, release 2512 — installation, configuration,
+            administration, Active Workspace, BMIDE data modelling, server/client APIs,
+            SOA & ITK development and customization (incl. the SOA API reference), and
+            the Active Integration Gateway (T4S/T4EA/T4O) for SAP and
+            enterprise-application integration (AIG runs on and is configured through
+            Teamcenter, so AIG install/config topics live here). Use for how Teamcenter
+            2512 works; for what changed between releases use teamcenter-whats-new.
+        - name: teamcenter-whats-new
+          dir: /data/docs/teamcenter-whats-new
+          collection: teamcenter_whats_new
           description: >-
-            Siemens Ecosys (EcoSys EPC) — enterprise project performance: project
-            controls, cost management, scheduling and forecasting.
-        - name: polarion
-          dir: /data/docs/polarion
-          collection: polarion
+            Siemens Teamcenter release notes — the What's New guide of each release
+            (Teamcenter 14.3, 2312, 2406, 2412, 2506, 2512, 2606) and the Teamcenter
+            Gateway (T4S, T4EA) What's New for 2512. Use for which release introduced,
+            changed or removed a feature, and for upgrade planning; for how a feature
+            works in detail, search that release's own documentation pool
+            (e.g. teamcenter-2512).
+        # 2606 went in with its PDF guides only (2026-10-16). When its `SOA Reference/`
+        # and `AIG APIs Documentation/` are added, drop the last sentence below and say
+        # "(incl. the SOA API reference)" like 2512 — the nightly sync adds the files.
+        - name: teamcenter-2606
+          dir: /data/docs/teamcenter-2606
+          collection: teamcenter_2606
           description: >-
-            Siemens Polarion ALM — application lifecycle management: requirements
-            engineering, test management (QA), defect/issue tracking, and agile
-            project management. Covers server administration, LiveDocs, Work Items
-            configuration, Open API/REST development, and UI customization (Velocity
-            scripting, Widgets). Includes backend architecture details (e.g., Subversion/SVN).
+            Siemens Teamcenter PLM, release 2606 — installation, configuration,
+            administration, Active Workspace, BMIDE data modelling, SOA & ITK
+            development and customization guides, and the Active Integration Gateway
+            (T4S/T4EA/T4O) for SAP and enterprise-application integration (AIG runs on
+            and is configured through Teamcenter, so AIG install/config topics live
+            here). Use for how Teamcenter 2606 works; for what changed between releases
+            use teamcenter-whats-new. The 2606 API reference (SOA/AIG API docs) is not
+            included yet — for API details use teamcenter-2512.
 
     # Per-host deployment tuning — kept in this operator playbook on purpose:
     # NOT in host_vars (host facts only) and NOT in the product repo (the app
@@ -220,7 +251,10 @@
       vhost2:                                 # Mac mini M2 (16GB) — production profile
         cargo_build_jobs: "8"
         config:
-          ingest: { batch_size: 64 }
+          # 32, not 64: the embedder pads each batch to its longest chunk and attention
+          # memory grows with batch x length^2 — batch 64 peaked at 7.6 GB on one
+          # 587-token chunk, batch 32 at 3.7 GB and slightly faster (2026-10-15).
+          ingest: { batch_size: 32 }
           qdrant: { on_disk_vectors: true, quantization: scalar }
 
   tasks:

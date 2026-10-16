@@ -3,6 +3,24 @@
 # present (e.g. after a manual docker load on a constrained host). Context = repo ROOT
 # for the two app images (shared docs_bridge package); Dockerfiles under images/.
 
+# Both app Dockerfiles copy their models FROM the frozen models image (docs-bridge repo,
+# images/models/Dockerfile) instead of exporting them at build. It can no longer be
+# rebuilt from deployed images, so a host without it must load it from its saved tar
+# (podman load -i docs-bridge-models-frozen-2026-09.tar) before any app-image build.
+- name: Check the frozen models image is present
+  ansible.builtin.command: "{{ container_runtime }} image exists localhost/docs-bridge-models:frozen-2026-09"
+  register: db_models_image
+  changed_when: false
+  failed_when: false
+
+- name: Fail early without the frozen models image
+  ansible.builtin.fail:
+    msg: >-
+      localhost/docs-bridge-models:frozen-2026-09 is missing on {{ inventory_hostname }}.
+      Load it first: podman load -i docs-bridge-models-frozen-2026-09.tar (kept next to
+      the Qdrant snapshots). The app images build FROM it.
+  when: db_models_image.rc != 0
+
 - name: Build the ingest-worker image
   community.docker.docker_image:
     # Fully qualified (localhost/) so podman's enforcing short-name mode never sends a
