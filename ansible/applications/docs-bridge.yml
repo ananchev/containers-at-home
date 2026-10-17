@@ -65,6 +65,11 @@
     # Rollback: the previous images stay as docker.io/library/docs-bridge:latest and
     # localhost/ingest-worker:latest (old embedder runtime, old manifest + collections).
     docs_bridge_image_tag: "2026.10-macmini"
+    # The frozen model artifacts both app images are built FROM (see images.yml). The
+    # backup exports every docs-bridge-models tag as docs-bridge-models-<tag>.tar.
+    docs_bridge_models_tag: "frozen-2026-09"
+    docs_bridge_models_image: "localhost/docs-bridge-models:{{ docs_bridge_models_tag }}"
+    docs_bridge_models_tar: "docs-bridge-models-{{ docs_bridge_models_tag }}.tar"
     server_image: "localhost/docs-bridge:{{ docs_bridge_image_tag }}"
     # The worker image is referenced FULLY QUALIFIED everywhere (build, on-demand ingest,
     # systemd timer). Podman runs short-name-mode="enforcing": an unqualified

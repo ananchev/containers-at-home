@@ -40,6 +40,24 @@ backup_definitions:
           done > "$dest/docs-manifest.tsv"
         fi
 
+        # 4. The frozen model artifacts (docs-bridge repo images/models/Dockerfile):
+        #    every localhost/docs-bridge-models:<tag> image, as a podman archive. Both
+        #    app images are built FROM it, and it can never be re-made: re-exporting the
+        #    models from current libraries gives DIFFERENT models than the ones every
+        #    stored vector was embedded with. Exported on every run (~1.1 GB, the ONNX
+        #    files do not compress) so each dated backup is complete on its own —
+        #    retention deletes old folders, so a once-only export would eventually be
+        #    lost. Restore: the deploy loads a staged docs-bridge-models-<tag>.tar when
+        #    the image is missing (applications/tasks/docs-bridge/images.yml).
+        tags=$(podman image ls --noheading localhost/docs-bridge-models | awk '{print $2}')
+        if [ -z "$tags" ]; then
+          echo "no localhost/docs-bridge-models image on $(hostname) — models NOT backed up" \
+            > "$dest/MODELS-IMAGE-MISSING.txt"
+        fi
+        for tag in $tags; do
+          podman save -o "$dest/docs-bridge-models-$tag.tar" "localhost/docs-bridge-models:$tag"
+        done
+
   # docs-bridge stack, LibreChat side: the conversation/user DB is the only
   # must-back-up state (meili is a derived index; config is rendered from the repo).
   # Restored on a fresh deploy by applications/docs-bridge.yml.

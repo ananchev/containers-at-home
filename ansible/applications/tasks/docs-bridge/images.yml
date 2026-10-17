@@ -4,22 +4,48 @@
 # for the two app images (shared docs_bridge package); Dockerfiles under images/.
 
 # Both app Dockerfiles copy their models FROM the frozen models image (docs-bridge repo,
-# images/models/Dockerfile) instead of exporting them at build. It can no longer be
-# rebuilt from deployed images, so a host without it must load it from its saved tar
-# (podman load -i docs-bridge-models-frozen-2026-09.tar) before any app-image build.
+# images/models/Dockerfile) instead of exporting them at build. It can never be re-made
+# (a re-export from current libraries gives different models), so the backup exports it
+# every run (backups/backup_definitions.yml, step 4). On a host without it — a fresh or
+# rebuilt one — stage that tar with the other restore archives in
+# application_data/docs-bridge/ and this loads it; without the tar, fail early.
 - name: Check the frozen models image is present
-  ansible.builtin.command: "{{ container_runtime }} image exists localhost/docs-bridge-models:frozen-2026-09"
+  ansible.builtin.command: "{{ container_runtime }} image exists {{ docs_bridge_models_image }}"
   register: db_models_image
   changed_when: false
   failed_when: false
 
+- name: Copy the staged models archive to the host (only when the image is missing)
+  ansible.builtin.copy:
+    src: "{{ application_data }}/{{ application }}/{{ docs_bridge_models_tar }}"
+    dest: "/tmp/{{ docs_bridge_models_tar }}"
+    mode: '0644'
+  when:
+    - db_models_image.rc != 0
+    - (application_data ~ '/' ~ application ~ '/' ~ docs_bridge_models_tar) is file
+  register: db_models_copied
+
+- name: Load the frozen models image from the staged archive
+  ansible.builtin.command: "{{ container_runtime }} load -i /tmp/{{ docs_bridge_models_tar }}"
+  when: db_models_copied is changed
+  changed_when: true
+
+- name: Remove the copied models archive
+  ansible.builtin.file:
+    path: "/tmp/{{ docs_bridge_models_tar }}"
+    state: absent
+  when: db_models_copied is changed
+
 - name: Fail early without the frozen models image
   ansible.builtin.fail:
     msg: >-
-      localhost/docs-bridge-models:frozen-2026-09 is missing on {{ inventory_hostname }}.
-      Load it first: podman load -i docs-bridge-models-frozen-2026-09.tar (kept next to
-      the Qdrant snapshots). The app images build FROM it.
-  when: db_models_image.rc != 0
+      {{ docs_bridge_models_image }} is missing on {{ inventory_hostname }} and no
+      {{ docs_bridge_models_tar }} is staged in {{ application_data }}/{{ application }}/.
+      Take it from any docs-bridge backup folder (the backup exports it every run) and
+      stage it there, then re-run. The app images build FROM it.
+  when:
+    - db_models_image.rc != 0
+    - db_models_copied is not changed
 
 - name: Build the ingest-worker image
   community.docker.docker_image:
