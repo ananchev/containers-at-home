@@ -216,12 +216,11 @@
           dir: /data/docs/teamcenter-whats-new
           collection: teamcenter_whats_new
           description: >-
-            Siemens Teamcenter release notes — the What's New guide of each release
-            (Teamcenter 14.3, 2312, 2406, 2412, 2506, 2512, 2606) and the Teamcenter
-            Gateway (T4S, T4EA) What's New for 2512. Use for which release introduced,
-            changed or removed a feature, and for upgrade planning; for how a feature
-            works in detail, search that release's own documentation pool
-            (e.g. teamcenter-2512).
+            Siemens Teamcenter release notes — the What's New guides published with
+            each Teamcenter release and with its companion and add-on products. Use for
+            which release introduced, changed or removed a feature, and for upgrade
+            planning; for how a feature works in detail, search that release's own
+            documentation pool (teamcenter-<release>).
         # 2606 went in with its PDF guides only (2026-10-16). When its `SOA Reference/`
         # and `AIG APIs Documentation/` are added, drop the last sentence below and say
         # "(incl. the SOA API reference)" like 2512 — the nightly sync adds the files.
