@@ -44,16 +44,15 @@ backup_definitions:
         #    every localhost/docs-bridge-models:<tag> image, as a podman archive. Both
         #    app images are built FROM it, and it can never be re-made: re-exporting the
         #    models from current libraries gives DIFFERENT models than the ones every
-        #    stored vector was embedded with. Exported on every run (~1.1 GB, the ONNX
-        #    files do not compress) so each dated backup is complete on its own —
-        #    retention deletes old folders, so a once-only export would eventually be
-        #    lost. Restore: the deploy loads a staged docs-bridge-models-<tag>.tar when
-        #    the image is missing (applications/tasks/docs-bridge/images.yml).
+        #    stored vector was embedded with. Saved fresh on every run: the target is a
+        #    mirror (rsync -c, no --delete), so unchanged bytes cost no transfer and are
+        #    stored once, while the new mtime keeps the file fresh — if the export ever
+        #    stops (the image is gone), the tar goes stale and backup-audit's staleness
+        #    check flags it. No marker file: in a mirror without --delete it would
+        #    outlive the problem. Restore: the deploy loads a staged
+        #    docs-bridge-models-<tag>.tar when the image is missing (images.yml).
         tags=$(podman image ls --noheading localhost/docs-bridge-models | awk '{print $2}')
-        if [ -z "$tags" ]; then
-          echo "no localhost/docs-bridge-models image on $(hostname) — models NOT backed up" \
-            > "$dest/MODELS-IMAGE-MISSING.txt"
-        fi
+        [ -n "$tags" ] || echo "WARNING: no localhost/docs-bridge-models image — models NOT backed up" >&2
         for tag in $tags; do
           podman save -o "$dest/docs-bridge-models-$tag.tar" "localhost/docs-bridge-models:$tag"
         done

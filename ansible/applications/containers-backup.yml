@@ -90,7 +90,12 @@
         ansible.builtin.command:
           docker exec -i {{ container_name }} /bin/sh -c 'echo "{{ ansible_vault_pass }}" > /ansible/vault.pass'
 
+      # Untagged (dangling) images only — on podman that includes the build's leftover
+      # layers. NOT `system prune -af`: that removed every image no running container
+      # used, on every host this deploys to — on vhost2 the docs-bridge frozen models
+      # image (built FROM, never run) and the ingest-worker (one-shot, so never running)
+      # went with it on 2026-10-17, breaking the backup's model export and the timer.
       - name: Clean the build cache and non-tagged images
-        ansible.builtin.command: docker system prune -af
+        ansible.builtin.command: docker image prune -f
 
       when: inventory_hostname in application_services['containers-backup'].hosts

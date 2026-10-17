@@ -26,8 +26,10 @@ so a restored index can be traced back to its source files.
   (`GET /collections`), so backup needs no per-collection config.
 - Definition: the `docs-bridge` entry in `backups/backup_definitions.yml`.
 - Each run also exports the **frozen models image** (`localhost/docs-bridge-models:<tag>`,
-  ~1.1 GB) as `docs-bridge-models-<tag>.tar` — every run, so every retained backup is
-  complete. It can never be re-made (a re-export gives different models than the stored
+  ~1.1 GB) as `docs-bridge-models-<tag>.tar`. The ZFS target is a mirror (rsync, no
+  `--delete`), so it is stored once and its refreshed mtime is what backup-audit's
+  staleness check watches. Corollary: a file the backup stops producing (a dropped
+  collection's `<name>.snapshot`) stays in the mirror until removed by hand. It can never be re-made (a re-export gives different models than the stored
   vectors were embedded with). On a fresh host, stage that tar in
   `application_data/docs-bridge/` with the other archives: the deploy's images step loads
   it when the image is missing (no `run_restore` needed — it only ever fills an absence).
