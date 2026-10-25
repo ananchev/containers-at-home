@@ -42,33 +42,21 @@ nextcloud_admin_password: "<admin password>"
 nextcloud_db_password:    "<postgres password>"
 nextcloud_redis_password: "<redis password>"
 
-# App password (NOT the login password) of the dedicated `mcp` Nextcloud user.
-# Generated manually once — see "MCP access for claude.ai (web)" below.
-nextcloud_mcp_app_password: "<mcp user app password>"
-
 # Shared JWT secret signing every Nextcloud <-> Document Server request.
 # Generate once: openssl rand -hex 32  — see "OnlyOffice in-place editing" below.
 nextcloud_onlyoffice_jwt_secret: "<openssl rand -hex 32>"
 ```
 
-Reused from the existing vault: `backup_private_key`, `backup_user`. The MCP shim
-also reads `mcp_auth_server.public_url` and `mcp_auth_server.oauth_signing_key` from
-the **shared (symlinked) vault** — the same keys the `mcp-auth` AS uses on unas.
+Reused from the existing vault: `backup_private_key`, `backup_user`.
 
 ## Image versions & DIUN watching
 
 `nextcloud.yml` reads its images from the vaulted `app_versions.yml` keys
-`nextcloud_app`, `nextcloud_db`, `nextcloud_redis`, `nextcloud_elasticsearch`,
-`nextcloud_mcp` (the stock upstream MCP server), and `nextcloud_onlyoffice` (the
-Document Server) — so those entries are the single source of truth for both the
-deployed tags and DIUN's watchlist. The shim image is
-**built locally** from its git repo, so it has no `app_versions` entry. Add e.g.:
+`nextcloud_app`, `nextcloud_db`, `nextcloud_redis`, `nextcloud_elasticsearch` and
+`nextcloud_onlyoffice` (the Document Server) — so those entries are the single source
+of truth for both the deployed tags and DIUN's watchlist. Add e.g.:
 
 ```yaml
-  nextcloud_mcp:
-    image: "ghcr.io/cbcoutinho/nextcloud-mcp-server:latest"
-    diun_include_pattern: '^\d+\.\d+\.\d+$'
-
   nextcloud_onlyoffice:
     image: "onlyoffice/documentserver:latest"
     diun_include_pattern: '^\d+\.\d+\.\d+$'
@@ -77,17 +65,24 @@ optional `diun_watch: false`) in the usual `app_versions.yml` style; there are n
 versions hardcoded here or in the playbook to keep in sync.
 
 > **Pin `nextcloud_app` to a major the FTS apps support.** `fulltextsearch` &co. lag
-> the newest Nextcloud — they support up to **33**, not 34. Check the app store
+> the newest Nextcloud by weeks to months. As of 2026-10 they support **34**
+> (`fulltextsearch` 34.0.3, `fulltextsearch_elasticsearch` 34.0.3,
+> `files_fulltextsearch` 34.0.1); nothing official for **35** yet. Check the app store
 > (`apps.nextcloud.com/api/v1/platform/<ver>/apps.json`) before bumping a major.
 
-`nextcloud_elasticsearch` is the **base** image for the locally-built
-`nextcloud-elasticsearch:local` (the playbook bakes in `ingest-attachment`). It must be
-real **Elasticsearch**, not OpenSearch — the `fulltextsearch_elasticsearch` app's
-elastic client does a product-check that rejects OpenSearch. E.g.:
+`nextcloud_elasticsearch` is run **as-is** — document-content extraction
+(`ingest-attachment`) is a bundled module since ES 8.4, so there's no plugin install
+or local build. (`elasticsearch-plugin list` is therefore empty; check it with
+`curl -s 'localhost:9200/_nodes/plugins?filter_path=nodes.*.modules.name'` inside the
+container instead.) It must be real **Elasticsearch**, not OpenSearch — the `fulltextsearch_elasticsearch` app's
+elastic client does a product-check that rejects OpenSearch. We run **ES 9.4.x**:
+the app's README still says "Elasticsearch 8 only", but that's stale — app ≥ 31.0.1
+uses an ES 9 client and works against 9 (validated by `occ fulltextsearch:test`).
+Stay on 9.x patch releases; trial a 9.x **minor** bump on its own deploy. E.g.:
 
 ```yaml
   nextcloud_elasticsearch:
-    image: "docker.elastic.co/elasticsearch/elasticsearch:8.15.3"
+    image: "elasticsearch:9.4.8"
     diun_include_pattern: '^\d+\.\d+\.\d+$'
     diun_watch: false   # bumped together with the nextcloud stack
 ```
@@ -96,6 +91,32 @@ elastic client does a product-check that rejects OpenSearch. E.g.:
 > `nextcloud_app` tag in `app_versions.yml` and re-running the playbook. The image
 > runs `occ upgrade` automatically on start; the playbook waits for `occ status` to
 > report `installed: true` before continuing.
+
+> **Postgres: stay on the major (17.x).** A minor/Alpine bump (e.g. `17.3-alpine3.21`
+> → `17.11-alpine3.24`) is just a container recreate. A **major** bump (→ 18) changes
+> the on-disk format and needs `pg_upgrade` or a dump/restore — never just a tag change.
+
+### Upgrade log
+
+* **2026-10-24 — PHP2Shell (CVE-2026-109618 / CVE-2026-109619).** Unauthenticated
+  RCE in the PHP engine, exploited in the wild; fixed in PHP 8.5.12 / 8.4.27 / 8.3.36
+  / 8.2.35 (released 2026-10-21). We were on `nextcloud:33.0.5-apache` = PHP 8.4.22.
+  `33.0.10-apache` was **not** a safe fix: Docker Hub pushed it (2026-10-23 17:17Z)
+  before the patched `php:8.4-apache-trixie` base (18:57Z), so it likely still had
+  8.4.26. NC 34 builds on `php:8.5-apache-trixie` (8.5.12 pushed 15:58Z, before
+  `34.0.5-apache`), so we went 33.0.5 → **34.0.5** (one major) and verified PHP 8.5.12
+  via `docker exec nextcloud-app php -v`. **Lesson:** after a PHP CVE, check the image
+  ships the fixed PHP (`php -v`); a newer Nextcloud tag doesn't guarantee it.
+  * The post-upgrade `occ fulltextsearch:test` failed only at *Locking process*
+    (`Index is already running`) — platform + ES checks passed. Either the cron was
+    indexing or a lock was orphaned by the container swap; cleared with
+    `occ fulltextsearch:stop`, then the test passed.
+  * Follow-up deploy: `postgres` 17.3-alpine3.21 → 17.11-alpine3.24, `redis`
+    alpine3.21 → alpine3.23, `elasticsearch` 9.4.2 → 9.4.8. The MCP server + shim
+    were retired in the same change (see below).
+  * Dropped the local `nextcloud-elasticsearch:local` build: its only step,
+    `elasticsearch-plugin install ingest-attachment`, has been a no-op since ES 8.4
+    (now a bundled module). The container runs the stock image directly.
 
 ## Playbook structure
 
@@ -111,7 +132,6 @@ be (re)deployed alone:
 | `app.yml` | `app` | app + cron containers, install-wait, post-install `occ`, backup SSH key |
 | `fulltextsearch.yml` | `fts` | ES-wait, install/wire FTS apps, validate |
 | `onlyoffice.yml` | `onlyoffice` | DS dirs + container + health-wait + connector |
-| `mcp.yml` | `mcp` | MCP-server fork build/run, shim build/run |
 
 A full run (no `--tags`) executes every phase in order, exactly as the old
 single-file playbook did. Scoped runs assume the shared bits an earlier phase
@@ -124,9 +144,8 @@ prior full deploy; a first-ever deploy must run the whole play.
 # full deploy (all phases, dependency order)
 ./run-playbook.sh vhost nextcloud ~/.ssh/id_ed25519_vhost
 
-# scoped — just one phase, e.g. OnlyOffice or MCP (no image-rebuild churn)
+# scoped — just one phase, e.g. OnlyOffice (no image-rebuild churn)
 ./run-playbook.sh vhost nextcloud ~/.ssh/id_ed25519_vhost --tags onlyoffice
-./run-playbook.sh vhost nextcloud ~/.ssh/id_ed25519_vhost --tags mcp
 ```
 
 ## Backups
@@ -181,8 +200,7 @@ off Cloudflare:
 
 `StorageUrl` is the **LAN IP, not the container name**, on purpose: `192.168.2.3` is
 already a trusted domain, so the DS's file fetch/save never trips Nextcloud's
-untrusted-domain guard and never needs a `NEXTCLOUD_TRUSTED_DOMAINS` edit — same way
-`nextcloud-mcp` reaches Nextcloud.
+untrusted-domain guard and never needs a `NEXTCLOUD_TRUSTED_DOMAINS` edit.
 
 **Security boundary:** a shared **JWT secret** (`nextcloud_onlyoffice_jwt_secret` in
 the vault, `openssl rand -hex 32`) signs every NC↔DS request, set on both the DS
@@ -196,7 +214,7 @@ attach the `*.tonio.cc` wildcard cert with Force SSL, and reuse the **Cloudflare
 allowlist + `deny all`** block in the Advanced tab — same front-door pattern as the
 other CF-fronted hosts. (Single-label so CF Universal SSL / the wildcard covers it.)
 
-> Like the MCP shim, **don't** add `proxy_*` / `chunked_transfer_encoding` directives
+> **Don't** add `proxy_*` / `chunked_transfer_encoding` directives
 > to NPM's Advanced tab — they fail `nginx -t` in that context and NPM silently skips
 > writing the host (→ Cloudflare 525). Websockets toggle + the CF allowlist is all it
 > needs.
@@ -226,8 +244,7 @@ paying the full playbook's image-rebuild churn:
 
 (A scoped run assumes `nextcloud-net` already exists — true after any prior full
 deploy. A first-ever deploy runs the whole playbook.) A full re-run is also safe and
-idempotent; it just rebuilds the ES/shim/MCP-fork images every time (`force_source`/
-`force: true`), so it's slower and noisier in the `changed=` count.
+idempotent.
 
 ## Roadmap: content indexing & search
 
@@ -235,8 +252,8 @@ Planned as a follow-up phase (the design keeps it first-class because everything
 local NVMe):
 
 1. **Full-text search — DONE.** `nextcloud-elasticsearch` (single node, security
-   disabled, internal-only) runs on `nextcloud-net`, built from `nextcloud_elasticsearch`
-   with the `ingest-attachment` plugin so document *contents* are indexed. (Must be
+   disabled, internal-only) runs on `nextcloud-net` from the stock `nextcloud_elasticsearch`
+   image, whose bundled `ingest-attachment` module indexes document *contents*. (Must be
    Elasticsearch, not OpenSearch — the app's elastic client product-check rejects
    OpenSearch.) The playbook sets `vm.max_map_count`, caps the JVM heap
    (`elasticsearch_heap`, 2g ≈ 50% of the limit) and the container memory
@@ -254,96 +271,32 @@ local NVMe):
      `elasticsearch_heap` / `elasticsearch_mem_limit`.
 2. **Recognize** — *excluded by design*: it's local-only ML and photos live in immich,
    not Nextcloud.
-3. **Context Chat / MCP — DONE.** The AI stays external (claude.ai web); a stock MCP
-   server + a thin auth shim run locally to expose "search/read/draft my Nextcloud"
-   tooling, in the style of the cycling-stack / healthbridge MCP servers. See the
-   dedicated section below.
+3. **Context Chat / MCP — RETIRED (2026-10).** Built and ran for a while (MCP server
+   + auth shim for claude.ai web), then removed as unused. See the section below.
 
-## MCP access for claude.ai (web)
+## MCP access for claude.ai (web) — retired 2026-10
 
-Lets claude.ai (web) reach Nextcloud as a remote MCP connector — "search this
-directory… read that file… write a draft" — gated by the **existing** `mcp-auth`
-OAuth Authorization Server (cycling-stack on unas). Two containers join `nextcloud-net`:
+The `nextcloud-mcp` server (built from the `ananchev/nextcloud-mcp-server`
+`feat/full-text-search` fork) and the `nextcloud-mcp-shim` OAuth Resource Server
+(exposed as `ncmcp.tonio.cc`, gated by the shared `mcp-auth` AS on unas) were removed
+because they weren't used. A one-off teardown run removed the containers, images and
+`…/nextcloud/mcp-{shim,fork}` checkouts, after which `tasks/nextcloud/mcp.yml` was
+deleted. Both containers were stateless, so there was no data to migrate.
 
-| Container | Role | Exposed? |
-|---|---|---|
-| `nextcloud-mcp` | stock [`cbcoutinho/nextcloud-mcp-server`] (single-user, Basic Auth, `:8000` `/mcp`) | no — internal only |
-| `nextcloud-mcp-shim` | [`ananchev/nextcloud-mcp-shim`] OAuth Resource Server: RFC 9728 discovery + HS256 bearer gate + transparent proxy (`:8093`) | yes — via NPM |
+Manual leftovers (outside the playbook):
 
-**Why a shim:** the stock server can't validate `mcp-auth`'s tokens or emit RFC 9728
-metadata, so it can't slot into the "one AS, many RS" model on its own. The shim is
-that RS half; it reuses `mcp-auth` unchanged (audience-less HS256 — same signing key +
-issuer is all it needs) and keeps the upstream stock/upgradable. It strips the caller's
-`Authorization` header before proxying, so the bearer never leaks to the upstream (which
-authenticates to Nextcloud with its own app password).
+* **NPM on fed:** delete the `ncmcp.tonio.cc` proxy host (→ `192.168.2.3:8093`), and its
+  Cloudflare DNS record if it has one.
+* **Nextcloud:** delete the `mcp` user (its app password dies with it). This also drops
+  the read-only shares to it and its `/AI` sandbox — check `/AI` for anything worth
+  keeping first.
+* **Vault:** remove `nextcloud_mcp_app_password` from `vault.yml`. Leave
+  `mcp_auth_server.*` — `mcp-auth` still serves the cycling-stack / healthbridge MCPs.
+* **claude.ai:** remove the Nextcloud (`ncmcp`) connector.
 
-### Setup assumptions (manual bootstrap — do once)
+If it's ever revived, the design (shim as RS for `mcp-auth`, least privilege via
+read-only shares + an owned `/AI` sandbox, the fixed `mcp-oauth-client` client ID to
+skip DCR, no `proxy_*` directives in NPM's Advanced tab) is in git history before
+this change, and in the [`ananchev/nextcloud-mcp-shim`] repo.
 
-The auth gate is **all-or-nothing**: a valid token grants the upstream's *full* toolset.
-Least privilege is therefore enforced **downstream at the Nextcloud share layer**, so the
-`mcp` user must own nothing of the real data. In the Nextcloud admin UI:
-
-1. **Create a dedicated, NON-admin user** `mcp` (Settings → Users). It must **not** be
-   in the `admin` group. This is the identity the upstream MCP server logs in as.
-2. **Generate an app password** for it (sign in as `mcp` → Settings → Security → Devices
-   & sessions → *Create new app password*), and put it in the vault as
-   `nextcloud_mcp_app_password`. Never use the login password.
-3. **Share the corpus READ-ONLY into `mcp`.** From your own account, share the folders
-   the AI may read to the `mcp` user with **Read only** permission (no create/edit/
-   delete/reshare). Nextcloud enforces the permission bitmask server-side, below MCP.
-4. **Give it an owned `/AI` sandbox** for drafts. As `mcp`, create a top-level `/AI`
-   folder — the AI *owns* this, so worst case is junk in the sandbox, never deletion of
-   real files. Point "write a draft" workflows here.
-
-> Blast-radius model: read-only everywhere that matters + a throwaway sandbox it owns.
-> Tightening further (a per-tool denylist) is a designed-in shim extension, not built.
-
-### Exposure (NPM on fed)
-
-Add a proxy host for the shim's single-label hostname → `http://192.168.2.3:8093`,
-**Websockets on**, and **attach an SSL cert** (the `*.tonio.cc` wildcard, or a fresh
-Let's Encrypt one) with Force SSL — same front-door pattern as `mcp-auth` (single-label
-so Cloudflare Universal SSL covers it; `mcp-auth` already allows the
-`claude.ai/api/mcp/auth_callback` redirect, so no AS change is needed).
-
-The Advanced tab gets **only** the **Cloudflare-IP allowlist + `deny all`** (reuse the
-same block as the other CF-fronted hosts).
-
-> **Do NOT put `proxy_*` / `chunked_transfer_encoding` directives in the Advanced tab.**
-> NPM runs `nginx -t` before writing the host's `.conf`; those fail the test in that
-> context, so NPM silently skips writing the file and the host returns Cloudflare
-> **525** (no origin TLS for that SNI) — which looks like a cert problem but isn't.
-> If MCP's SSE streaming ever buffers, fix it at the **shim** (emit
-> `X-Accel-Buffering: no` on streamed responses — nginx honours it per-response with
-> no NPM custom config), not in NPM.
-
-Verify from outside, then add the connector in claude.ai pointing at `https://ncmcp.tonio.cc/mcp`:
-
-```bash
-curl -s https://ncmcp.tonio.cc/.well-known/oauth-protected-resource | python3 -m json.tool
-# resource == https://ncmcp.tonio.cc ; authorization_servers == [the mcp-auth URL]
-curl -i https://ncmcp.tonio.cc/mcp   # 401 + WWW-Authenticate: Bearer resource_metadata="…"
-curl -s https://ncmcp.tonio.cc/healthz   # {"status":"ok"}
-```
-
-### Adding the connector in claude.ai — set the OAuth Client ID manually
-
-In the connector's advanced settings, set **OAuth Client ID** = `mcp-oauth-client`
-(leave the secret blank — it's a public, PKCE-only client).
-
-Why: claude.ai first tries **Dynamic Client Registration** (RFC 7591) against the AS to
-get a client_id automatically. `mcp-auth`'s `/register` is a non-validating stub that
-always returns the *fixed* id `mcp-oauth-client` and keeps no client registry — its
-authorize/token endpoints don't check client_id at all (auth is operator login + the
-redirect-URI allowlist + PKCE). When the auto-registration step hiccups (it's rate-limited
-per IP, and claude.ai aborts on any non-clean DCR response with *"Couldn't register with
-…'s sign-in service"*), entering the known fixed id skips DCR entirely and the flow goes
-straight to authorize + PKCE. Because the AS ignores client_id everywhere except echoing
-it, the static value works identically to a registered one — so it's the reliable path.
-
-> No new backups: both containers are stateless and the `/AI` sandbox lives in the
-> Nextcloud data dir already rsynced to the NAS.
-
-[`cbcoutinho/nextcloud-mcp-server`]: https://github.com/cbcoutinho/nextcloud-mcp-server
 [`ananchev/nextcloud-mcp-shim`]: https://github.com/ananchev/nextcloud-mcp-shim
-

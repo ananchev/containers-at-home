@@ -1,7 +1,8 @@
 ---
 # Datastores: the docker network + the three backing services (Elasticsearch,
-# Redis, Postgres) plus the guarded DB restore. The Elasticsearch image is built
-# locally from the app_versions base with ingest-attachment baked in.
+# Redis, Postgres) plus the guarded DB restore. Elasticsearch runs the stock
+# app_versions image: ingest-attachment (document-content extraction) is a bundled
+# module since ES 8.4, so no plugin install / local build is needed.
 - name: Create docker network for Nextcloud containers
   community.docker.docker_network:
     name: "{{ docker_network }}"
@@ -26,45 +27,11 @@
     group: "{{ elasticsearch_uid }}"
     mode: '0755'
 
-- name: Create Elasticsearch image build directory
-  ansible.builtin.file:
-    path: /tmp/nextcloud-elasticsearch-build
-    state: directory
-    mode: '0700'
-
-- name: Write Elasticsearch Dockerfile (bake in ingest-attachment)
-  ansible.builtin.copy:
-    dest: /tmp/nextcloud-elasticsearch-build/Dockerfile
-    content: |
-      FROM {{ app_versions.nextcloud_elasticsearch.image }}
-      RUN /usr/share/elasticsearch/bin/elasticsearch-plugin install --batch ingest-attachment
-  register: es_dockerfile
-
-- name: Check whether the Elasticsearch image already exists
-  community.docker.docker_image_info:
-    name: "{{ elasticsearch_image }}"
-  register: es_image_info
-
-# Rebuild only when the Dockerfile changed (e.g. a base-image bump in
-# app_versions.nextcloud_elasticsearch) or the image is missing (removed
-# out-of-band). force_source guarantees a clean build when it does fire, so a
-# routine re-run is a genuine no-op instead of an unconditional rebuild.
-- name: Build the Elasticsearch image
-  community.docker.docker_image:
-    name: nextcloud-elasticsearch
-    tag: local
-    source: build
-    build:
-      path: /tmp/nextcloud-elasticsearch-build
-    force_source: true
-    state: present
-  when: es_dockerfile.changed or (es_image_info.images | length == 0)
-
 - name: Run Elasticsearch container
   community.docker.docker_container:
     name: "{{ application }}-elasticsearch"
     hostname: "{{ application }}-elasticsearch"
-    image: "{{ elasticsearch_image }}"
+    image: "{{ nextcloud_images.elasticsearch }}"
     network_mode: "{{ docker_network }}"
     detach: true
     restart_policy: unless-stopped

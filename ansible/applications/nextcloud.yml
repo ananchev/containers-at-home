@@ -19,7 +19,7 @@
 #
 # Vault variables required (add to group_vars/all/vault.yml):
 #   nextcloud_admin_password, nextcloud_db_password, nextcloud_redis_password,
-#   nextcloud_mcp_app_password, nextcloud_onlyoffice_jwt_secret,
+#   nextcloud_onlyoffice_jwt_secret,
 #   nextcloud_serverinfo_token (serverinfo NC-Token for the Homepage widget).
 # Reused from the existing vault: backup_private_key, backup_user.
 #
@@ -31,7 +31,6 @@
 # tasks/nextcloud/, imported below in dependency order. Each import carries a tag
 # so a single concern can be (re)deployed on its own, e.g.:
 #   ./run-playbook.sh vhost nextcloud … --tags onlyoffice
-#   ./run-playbook.sh vhost nextcloud … --tags mcp
 # A full run (no --tags) executes them all, exactly as before. Scoped runs assume
 # the shared bits an earlier phase created (network, app container) already exist
 # — true after any prior full deploy; a first-ever deploy must run the whole play.
@@ -70,10 +69,9 @@
     # Elasticsearch full-text search (single node, security disabled — it only
     # listens on the isolated nextcloud-net, never exposed). Nextcloud's
     # fulltextsearch_elasticsearch app uses the official elastic client whose
-    # product-check rejects OpenSearch, so this must be real Elasticsearch. Image
-    # is built below from the app_versions base with ingest-attachment baked in so
-    # document *contents* (PDF/Office) are extracted and searchable.
-    elasticsearch_image: nextcloud-elasticsearch:local
+    # product-check rejects OpenSearch, so this must be real Elasticsearch. The
+    # stock image already bundles the ingest-attachment module (ES >= 8.4), so
+    # document *contents* (PDF/Office) are extracted and searchable as-is.
     elasticsearch_uid: "1000"
     elasticsearch_heap: 2g        # ~50% of the container limit (ES best practice)
     elasticsearch_mem_limit: 4g   # heap + Lucene/Tika off-heap; sized for a ~100GB corpus
@@ -82,35 +80,8 @@
       app: "{{ app_versions.nextcloud_app.image }}"
       postgres: "{{ app_versions.nextcloud_db.image }}"
       redis: "{{ app_versions.nextcloud_redis.image }}"
-      mcp: "{{ app_versions.nextcloud_mcp.image }}"   # stock cbcoutinho/nextcloud-mcp-server
+      elasticsearch: "{{ app_versions.nextcloud_elasticsearch.image }}"
       onlyoffice: "{{ app_versions.nextcloud_onlyoffice.image }}"   # onlyoffice/documentserver
-
-    # --- MCP access for claude.ai (web) --------------------------------------
-    # Two extra containers on nextcloud-net let claude.ai reach Nextcloud data:
-    #   * nextcloud-mcp       — the STOCK upstream MCP server (single-user, Basic
-    #     Auth) running as a dedicated, NON-admin `mcp` Nextcloud user. Internal
-    #     only (no published port). See notes/nextcloud.md for the user / read-only
-    #     shares / `/AI` sandbox setup assumptions that bound its blast radius.
-    #   * nextcloud-mcp-shim  — github.com/ananchev/nextcloud-mcp-shim, the OAuth
-    #     Resource Server that gates the upstream: serves RFC 9728 discovery,
-    #     validates the HS256 tokens minted by the shared `mcp-auth` AS (on unas,
-    #     reached at its public URL), then proxies /mcp. The ONLY one exposed,
-    #     via NPM (fed) -> ncmcp.tonio.cc. Reuses mcp-auth unchanged (its tokens
-    #     are audience-less HS256 — same signing key + issuer is all the shim needs).
-    nextcloud_mcp_user: mcp
-    nextcloud_mcp_public_url: https://ncmcp.tonio.cc
-    nextcloud_mcp_shim_port: 8093
-    nextcloud_mcp_shim_repo: https://github.com/ananchev/nextcloud-mcp-shim.git
-    nextcloud_mcp_shim_source: "{{ host_directory }}/mcp-shim/source"
-    # INTERIM fork build: the upstream MCP server has no file content-search tool,
-    # so we run our fork's full-text-search branch (adds nc_files_full_text_search;
-    # PR pending upstream at cbcoutinho/nextcloud-mcp-server). app_versions.nextcloud_mcp.image
-    # (vault) is pinned to `nextcloud_mcp_fork_image` below. To revert to stock: drop
-    # the two fork tasks and point that vault var back at an official ghcr.io tag.
-    nextcloud_mcp_fork_repo: https://github.com/ananchev/nextcloud-mcp-server.git
-    nextcloud_mcp_fork_version: feat/full-text-search
-    nextcloud_mcp_fork_source: "{{ host_directory }}/mcp-fork/source"
-    nextcloud_mcp_fork_image: nextcloud-mcp-server:fts-local
 
     # --- OnlyOffice in-place Office editing -----------------------------------
     # The OnlyOffice Document Server renders/edits docx/xlsx/pptx in the browser.
@@ -134,7 +105,7 @@
       when: inventory_hostname in application_services[application].hosts
       block:
         # Dependency order: filesystem/restore prep -> datastores (incl. DB
-        # restore) -> app + post-install -> full-text search -> OnlyOffice -> MCP.
+        # restore) -> app + post-install -> full-text search -> OnlyOffice.
         # Each import is tagged so it can be (re)run in isolation; see header.
         - name: Filesystem prep + restore staging
           ansible.builtin.import_tasks: tasks/nextcloud/prep.yml
@@ -155,7 +126,3 @@
         - name: OnlyOffice in-place editing (Document Server + connector)
           ansible.builtin.import_tasks: tasks/nextcloud/onlyoffice.yml
           tags: [onlyoffice]
-
-        - name: MCP access for claude.ai (server + auth shim)
-          ansible.builtin.import_tasks: tasks/nextcloud/mcp.yml
-          tags: [mcp]
