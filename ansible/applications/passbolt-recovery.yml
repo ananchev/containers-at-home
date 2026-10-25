@@ -9,7 +9,7 @@
     docker_network: "{{ application }}-net"
     mariadb_replication_server_id: 2 # Must be unique across Alpha and Beta MariaDB instances
     mariadb_replication_read_only: true # Keep standby DB read-only during normal operation; disable during failover
-    passbolt_main_host_ip: 192.168.2.8 # main passbolt host IP as accessible from the recovery host — used as MASTER_HOST for MariaDB replication
+    passbolt_main_host_ip: "{{ lan_addresses[application_services['passbolt'].hosts[0]] }}" # main passbolt host IP as accessible from the recovery host — used as MASTER_HOST for MariaDB replication
 
   tasks:
     - name: Run only on designated recovery host(s)
@@ -184,6 +184,7 @@
             src: "{{ passbolt_backup_source_dir }}/db_backup.sql"
             dest: "{{ host_directory }}/backup/db_backup.sql"
             mode: "0644"
+            force: false # only seeds a fresh mysql-data
 
         - name: Copy backup archive to temporary location on recovery host
           ansible.builtin.copy:

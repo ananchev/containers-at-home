@@ -114,6 +114,7 @@
           ansible.builtin.copy:
             src: "{{ local_backup_folder }}/db_backup.sql"
             dest: "{{ host_directory }}/backup"
+            force: false # only seeds a fresh mysql-data; overwriting the SELinux-labelled copy fails
 
         - name: Render MariaDB replication config to remote machine
           ansible.builtin.template:
@@ -229,11 +230,15 @@
         - name: Move the ssl certs from backup directory to the mount directory
           ansible.builtin.command: >  
             mv {{ host_directory }}/backup/backup/cert {{ host_directory }}
+          args:
+            creates: "{{ host_directory }}/cert/certificate.crt"
           become: true
 
         - name: Move gpg keys from backup directory to the mount directory
           ansible.builtin.command: >  
             mv {{ host_directory }}/backup/backup/gpg {{ host_directory }}
+          args:
+            creates: "{{ host_directory }}/gpg/serverkey_private.asc"
           become: true
 
         - name: Change gpg keys ownership to container's www-data user uid:gid
