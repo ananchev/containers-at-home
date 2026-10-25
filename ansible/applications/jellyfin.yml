@@ -16,14 +16,36 @@
           state: directory
           mode: '0755'
 
-      - name: Copy the backup archive to the remote machine
-        ansible.builtin.copy:
-          src: "{{ local_backup_folder }}/backup.tar.gz"
-          dest: "/tmp"
-      - name: Unzip file into the existing folder
-        ansible.builtin.command: >
-          tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}
-        become: true
+      # GUARD: restore only into an empty target (no jellyfin.db yet), so a routine
+      # re-run never extracts the backup over the live library DB.
+      - name: Check whether a live Jellyfin database already exists (restore guard)
+        ansible.builtin.stat:
+          path: "{{ host_directory }}/data/data/jellyfin.db"
+        register: jellyfin_db
+
+      - name: Refuse to deploy an empty Jellyfin when no backup is staged
+        ansible.builtin.fail:
+          msg: >-
+            {{ host_directory }} has no jellyfin.db and no backup.tar.gz is staged in
+            {{ local_backup_folder }}. Stage the backup and re-run, or pass
+            -e allow_empty_deploy=true for a deliberate fresh install.
+        when:
+          - not jellyfin_db.stat.exists
+          - (local_backup_folder + '/backup.tar.gz') is not file
+          - not (allow_empty_deploy | default(false) | bool)
+
+      - block:
+        - name: Copy the backup archive to the remote machine
+          ansible.builtin.copy:
+            src: "{{ local_backup_folder }}/backup.tar.gz"
+            dest: "/tmp"
+        - name: Unzip file into the existing folder
+          ansible.builtin.command: >
+            tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}
+          become: true
+        when:
+          - (local_backup_folder + '/backup.tar.gz') is file
+          - not jellyfin_db.stat.exists
 
       - name: Check for /dev/dri
         ansible.builtin.stat:

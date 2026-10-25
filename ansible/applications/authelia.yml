@@ -13,41 +13,18 @@
         block:
         - name: Set related variables (Redis)
           set_fact:
-            host_directory: "{{ docker_data_root }}/{{ application }}/redis"
             container_name: authelia-redis
-
-        - name: Create host directory
-          file:
-            path: "{{ host_directory }}"
-            state: directory
-            mode: '0755'
 
         - name: Create the common docker network
           community.docker.docker_network:
             name: "{{ docker_network }}"
             driver: bridge
             state: present
-        
-        - name: Copy local backup to the remote machine 
-          ansible.builtin.copy:
-            src: "{{ local_backup_folder }}/dump.rdb"
-            dest: "{{ host_directory }}/dump.rdb"
-            mode: '0644' 
 
-        - name: Add the dump.rdb selinux_files_to_label
-          set_fact:
-            selinux_files_to_label:
-            - "{{ host_directory }}/dump.rdb"    
-
-        - name: Add the host mount to selinux_dirs_to_label
-          set_fact:
-            selinux_dirs_to_label:
-            - "{{ host_directory }}"
-
-        - name: Configure SELinux for Redis
-          ansible.builtin.include_tasks:
-            file: ../_templates/configure_selinux.yml
-
+        # No host directory, SELinux labelling or dump.rdb restore for Redis: it keeps
+        # its data in the named volume below (a dump copied to a host dir was never
+        # loaded), and it only holds sessions -- users just log in again. The config +
+        # db.sqlite3 restore below is what carries the real state.
         - name: Run the redis container
           community.docker.docker_container:
             name: "{{ container_name }}"
@@ -86,15 +63,37 @@
             - "{{ host_directory }}"
             - "{{ host_directory }}/config"
 
-        - name: Copy the archive to the remote machine
-          ansible.builtin.copy:
-            src: "{{ local_backup_folder }}/backup.tar.gz"
-            dest: "/tmp"
+        # GUARD: restore only into an empty target (no configuration.yml yet), so a
+        # routine re-run never extracts the backup over the live config + db.sqlite3.
+        - name: Check whether a live Authelia config already exists (restore guard)
+          ansible.builtin.stat:
+            path: "{{ host_directory }}/config/configuration.yml"
+          register: authelia_config
 
-        - name: Unzip file into the existing folder
-          ansible.builtin.command: >
-            tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/config
-          become: true
+        - name: Refuse to deploy an empty Authelia when no backup is staged
+          ansible.builtin.fail:
+            msg: >-
+              {{ host_directory }}/config is empty and no backup.tar.gz is staged in
+              {{ local_backup_folder }}. Stage the backup and re-run, or pass
+              -e allow_empty_deploy=true for a deliberate fresh install.
+          when:
+            - not authelia_config.stat.exists
+            - (local_backup_folder + '/backup.tar.gz') is not file
+            - not (allow_empty_deploy | default(false) | bool)
+
+        - block:
+          - name: Copy the archive to the remote machine
+            ansible.builtin.copy:
+              src: "{{ local_backup_folder }}/backup.tar.gz"
+              dest: "/tmp"
+
+          - name: Unzip file into the existing folder
+            ansible.builtin.command: >
+              tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/config
+            become: true
+          when:
+            - (local_backup_folder + '/backup.tar.gz') is file
+            - not authelia_config.stat.exists
 
         - name: Restart chronyd service to ensure system clock gets properly synchronized
           ansible.builtin.service:

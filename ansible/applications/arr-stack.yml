@@ -3,13 +3,19 @@
   become: true
   gather_facts: False
   vars:
+    local_backup_folder: "{{ application_data }}/arr-stack"
+    # restore_marker: a file each app creates in /config (relative to it) -- its
+    # presence means a live instance, so the restore is skipped.
     arr_apps:
       - name: radarr
         port: "{{ application_services['arr-stack'].ports.radarr }}"
+        restore_marker: radarr.db
       - name: sonarr
         port: "{{ application_services['arr-stack'].ports.sonarr }}"
+        restore_marker: sonarr.db
       - name: bazarr
         port: "{{ application_services['arr-stack'].ports.bazarr }}"
+        restore_marker: db/bazarr.db
 
   tasks:
     - name: Run only on the designated host
@@ -22,16 +28,47 @@
           mode: '0755'
         loop: "{{ arr_apps }}"
 
+      # GUARD: restore only into an empty target (restore_marker absent), so a
+      # routine re-run never extracts a backup over a live app's DB.
+      - name: Check whether each app already has live state (restore guard)
+        ansible.builtin.stat:
+          path: "{{ docker_data_root }}/{{ item.name }}/config/{{ item.restore_marker }}"
+        register: arr_markers
+        loop: "{{ arr_apps }}"
+
+      - name: Refuse to deploy an empty app when no backup is staged
+        ansible.builtin.fail:
+          msg: >-
+            {{ item.0.name }} has no live state and no {{ item.0.name }}-backup.tar.gz is
+            staged in {{ local_backup_folder }}. Stage the backup and re-run, or pass
+            -e allow_empty_deploy=true for a deliberate fresh install.
+        when:
+          - not item.1.stat.exists
+          - (local_backup_folder + '/' + item.0.name + '-backup.tar.gz') is not file
+          - not (allow_empty_deploy | default(false) | bool)
+        loop: "{{ arr_apps | zip(arr_markers.results) | list }}"
+        loop_control:
+          label: "{{ item.0.name }}"
+
       - name: Copy the backup archive to the remote machine
         ansible.builtin.copy:
-          src: "{{ application_data }}/{{ item.name }}/backup.tar.gz"
-          dest: "/tmp/{{ item.name }}-backup.tar.gz"
-        loop: "{{ arr_apps }}"
+          src: "{{ local_backup_folder }}/{{ item.0.name }}-backup.tar.gz"
+          dest: "/tmp/{{ item.0.name }}-backup.tar.gz"
+        register: arr_backups_copied
+        when:
+          - (local_backup_folder + '/' + item.0.name + '-backup.tar.gz') is file
+          - not item.1.stat.exists
+        loop: "{{ arr_apps | zip(arr_markers.results) | list }}"
+        loop_control:
+          label: "{{ item.0.name }}"
 
       - name: Unzip file into the existing folder
         ansible.builtin.command: >
-          tar -xzvf /tmp/{{ item.name }}-backup.tar.gz -C {{ docker_data_root }}/{{ item.name }}/config
-        loop: "{{ arr_apps }}"
+          tar -xzvf /tmp/{{ item.item.0.name }}-backup.tar.gz -C {{ docker_data_root }}/{{ item.item.0.name }}/config
+        when: item is not skipped
+        loop: "{{ arr_backups_copied.results }}"
+        loop_control:
+          label: "{{ item.item.0.name }}"
 
       - name: Run the container
         community.docker.docker_container:

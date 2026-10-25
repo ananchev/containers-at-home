@@ -22,14 +22,6 @@
           - "{{ storage_directory }}"
           - "{{ host_directory }}/pgdata"
       
-      - name: Copy the db backups to the remote machine
-        ansible.builtin.copy:
-          src: "{{ local_backup_folder }}/{{ item }}"
-          dest: "/tmp"
-        loop:
-          - memos.sql
-          - postgres_globals.sql
-
       - name: Create the docker network for the memos containers
         community.docker.docker_network:
           name: "{{ docker_network }}"
@@ -49,43 +41,91 @@
           volumes:
             - "{{ host_directory }}/pgdata:/var/lib/postgresql/data:Z"
 
-      - name: Wait for 5 seconds to secure container is running
-        pause:
-          seconds: 5
+      - name: Wait for Postgres to be ready
+        ansible.builtin.command: docker exec {{ container_name }} pg_isready -U postgres
+        register: pg_ready
+        until: pg_ready.rc == 0
+        retries: 30
+        delay: 2
+        changed_when: false
 
-      - name: Copy the database backup into the container filesystem
-        ansible.builtin.command: 
-          docker cp /tmp/{{ item }} {{ container_name }}:/tmp
-        loop:
-          - memos.sql
-          - postgres_globals.sql
+      # GUARD: restore only into an empty target (no memos database, or one without
+      # tables), so a routine re-run never replays the dump into the live DB.
+      - name: Check whether the memos database exists (restore guard)
+        ansible.builtin.command: >
+          docker exec {{ container_name }}
+          psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'memos'"
+        register: memos_db_exists
+        changed_when: false
 
-      - name: Restore global objects (roles, tablespaces)
-        ansible.builtin.command:
-          docker exec {{ container_name }} psql -U postgres --set ON_ERROR_STOP=off -f /tmp/postgres_globals.sql
+      - name: Check whether the memos database is populated (restore guard)
+        ansible.builtin.command: >
+          docker exec {{ container_name }}
+          psql -U postgres -d memos -tAc
+          "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"
+        register: memos_db_tables
+        changed_when: false
+        when: (memos_db_exists.stdout | trim) == '1'
 
-      - name: Create memos database
-        ansible.builtin.command: docker exec {{ container_name }} createdb -U postgres memos
-        args:
-          creates: /var/lib/postgresql/data/base # used to check if file (or directory) exists before running the command
+      - name: Refuse to deploy an empty memos when no backup is staged
+        ansible.builtin.fail:
+          msg: >-
+            The memos database is empty and memos.sql / postgres_globals.sql are not both
+            staged in {{ local_backup_folder }}. Stage the backup and re-run, or pass
+            -e allow_empty_deploy=true for a deliberate fresh install.
+        when:
+          - memos_db_tables is skipped or (memos_db_tables.stdout | trim | int) == 0
+          - (local_backup_folder + '/memos.sql') is not file or (local_backup_folder + '/postgres_globals.sql') is not file
+          - not (allow_empty_deploy | default(false) | bool)
 
-      - name: Restore the database
-        ansible.builtin.command: 
-          docker exec {{ container_name }} psql -U postgres -d memos -f /tmp/memos.sql
+      - name: Restore the database from backup
+        when:
+          - (local_backup_folder + '/memos.sql') is file
+          - (local_backup_folder + '/postgres_globals.sql') is file
+          - memos_db_tables is skipped or (memos_db_tables.stdout | trim | int) == 0
+        block:
+        - name: Copy the db backups to the remote machine
+          ansible.builtin.copy:
+            src: "{{ local_backup_folder }}/{{ item }}"
+            dest: "/tmp"
+          loop:
+            - memos.sql
+            - postgres_globals.sql
+
+        - name: Copy the database backup into the container filesystem
+          ansible.builtin.command:
+            docker cp /tmp/{{ item }} {{ container_name }}:/tmp
+          loop:
+            - memos.sql
+            - postgres_globals.sql
+
+        - name: Restore global objects (roles, tablespaces)
+          ansible.builtin.command:
+            docker exec {{ container_name }} psql -U postgres --set ON_ERROR_STOP=off -f /tmp/postgres_globals.sql
+
+        - name: Create memos database
+          ansible.builtin.command: docker exec {{ container_name }} createdb -U postgres memos
+          when: (memos_db_exists.stdout | trim) != '1'
+
+        - name: Restore the database
+          ansible.builtin.command:
+            docker exec {{ container_name }} psql -U postgres -d memos -f /tmp/memos.sql
 
       - name: Set related variables (memos)
         set_fact:
           container_name: "{{ application }}"
 
-      - name: Copy the file archive backup to the remote machine
-        ansible.builtin.copy:
-          src: "{{ local_backup_folder }}/backup.tar.gz"
-          dest: "/tmp"
+      # this is commented until I fix the backup routine
+      # it needs to be updated so it works from the unas archive directory
+      # - name: Copy the file archive backup to the remote machine
+      #   ansible.builtin.copy:
+      #     src: "{{ local_backup_folder }}/backup.tar.gz"
+      #     dest: "/tmp"
 
-      - name: Unzip archive into the memos data folder
-        ansible.builtin.command: >
-          tar -xzvf /tmp/backup.tar.gz -C {{ storage_directory }}
-        become: true
+      # - name: Unzip archive into the memos data folder
+      #   ansible.builtin.command: >
+      #     tar -xzvf /tmp/backup.tar.gz -C {{ storage_directory }}
+      #   become: true
       
       - name: Run the memos container
         community.docker.docker_container:

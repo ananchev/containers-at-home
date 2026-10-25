@@ -7,6 +7,9 @@
     host_directory: "{{ docker_data_root }}/{{ application }}"
     docker_network: "{{ application }}-net"
     local_backup_folder: "{{ application_data }}/{{ application }}"
+    # Tagged with both upstream versions: the build skips when the image already
+    # exists, so an untagged (:latest) name would never rebuild on a version bump.
+    custom_image_name: "rustdesk-server-busybox:{{ app_versions['rustdesk']['image'] | regex_replace('^.*:', '') }}-bb{{ app_versions['busybox']['image'] | regex_replace('^.*:', '') }}"
 
   tasks:
     - name: Run only on the on the designated host
@@ -17,16 +20,38 @@
           state: directory
           mode: "0755"
 
-      - name: Copy the archive to the remote machine
-        ansible.builtin.copy:
-          src: "{{ local_backup_folder }}/backup.tar.gz"
-          dest: "/tmp"
+      # GUARD: restore only into an empty target (no server key yet), so a routine
+      # re-run never extracts the backup over the live keys + db_v2.sqlite3.
+      - name: Check whether a live RustDesk key already exists (restore guard)
+        ansible.builtin.stat:
+          path: "{{ host_directory }}/id_ed25519"
+        register: rustdesk_key
 
-      - name: Unzip file into the existing folder
-        ansible.builtin.command: >
-          tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}
-        become: true
-      
+      - name: Refuse to deploy an empty RustDesk when no backup is staged
+        ansible.builtin.fail:
+          msg: >-
+            {{ host_directory }} has no server key and no backup.tar.gz is staged in
+            {{ local_backup_folder }}. Stage the backup and re-run, or pass
+            -e allow_empty_deploy=true for a deliberate fresh install.
+        when:
+          - not rustdesk_key.stat.exists
+          - (local_backup_folder + '/backup.tar.gz') is not file
+          - not (allow_empty_deploy | default(false) | bool)
+
+      - block:
+        - name: Copy the archive to the remote machine
+          ansible.builtin.copy:
+            src: "{{ local_backup_folder }}/backup.tar.gz"
+            dest: "/tmp"
+
+        - name: Unzip file into the existing folder
+          ansible.builtin.command: >
+            tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}
+          become: true
+        when:
+          - (local_backup_folder + '/backup.tar.gz') is file
+          - not rustdesk_key.stat.exists
+
       - name: Бuild custom RustDesk image with busybox
         block:
           - name: Ensure build directory exists
@@ -52,7 +77,7 @@
 
           - name: Build the RustDesk image 
             community.docker.docker_image:
-              name: "rustdesk-server-busybox"
+              name: "{{ custom_image_name }}"
               source: build
               build:
                 path: "/tmp/rustdesk-source"
@@ -69,7 +94,7 @@
       - name: Run RustDesk relay (hbbr)
         community.docker.docker_container:
           name: rustdesk-hbbr
-          image: rustdesk-server-busybox
+          image: "{{ custom_image_name }}"
           command: hbbr
           restart_policy: unless-stopped
           volumes:
@@ -83,7 +108,7 @@
       - name: Run RustDesk rendezvous (hbbs)
         community.docker.docker_container:
           name: rustdesk-hbbs
-          image: rustdesk-server-busybox
+          image: "{{ custom_image_name }}"
           command: hbbs
           restart_policy: unless-stopped
           volumes:

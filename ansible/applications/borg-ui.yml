@@ -23,6 +23,24 @@
             - "{{ host_directory }}/borg_data"
             - "{{ host_directory }}/borg_cache"
 
+        # GUARD: restore only into an empty target (no borg.db yet), so a routine
+        # re-run never extracts the backup over the live DB.
+        - name: Check whether a live borg-ui database already exists (restore guard)
+          ansible.builtin.stat:
+            path: "{{ host_directory }}/borg_data/borg.db"
+          register: borg_ui_db
+
+        - name: Refuse to deploy an empty borg-ui when no backup is staged
+          ansible.builtin.fail:
+            msg: >-
+              {{ host_directory }}/borg_data has no borg.db and no backup.tar.gz is staged
+              in {{ local_backup_folder }}. Stage the backup and re-run, or pass
+              -e allow_empty_deploy=true for a deliberate fresh install.
+          when:
+            - not borg_ui_db.stat.exists
+            - backup_archive is not file
+            - not (allow_empty_deploy | default(false) | bool)
+
         - block:
           - name: Copy the backup archive to the remote machine
             ansible.builtin.copy:
@@ -32,7 +50,9 @@
             ansible.builtin.command: >
               tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/borg_data
             become: true
-          when: backup_archive is exists
+          when:
+            - backup_archive is file
+            - not borg_ui_db.stat.exists
 
         - name: Create the reverse-proxy-network if it does not exist
           community.docker.docker_network:

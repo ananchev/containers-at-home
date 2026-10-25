@@ -5,7 +5,9 @@
     application: nginx-proxy-manager
     host_directory: "{{ docker_data_root }}/{{ application }}"
     container_name: "{{ application }}"
-    custom_image_name: "{{ application }}-with-atd"
+    # Tagged with the upstream version: the build below skips when the image already
+    # exists, so an untagged (:latest) name would never rebuild on a version bump.
+    custom_image_name: "{{ application }}-with-atd:{{ app_versions['nginx-proxy-manager']['image'] | regex_replace('^.*:', '') }}"
     build_directory: "/tmp/{{ application }}-build"
     local_backup_folder: "{{ application_data }}/{{ application }}"
   
@@ -21,6 +23,24 @@
           - "{{ host_directory }}"
           - "{{ build_directory }}"
 
+      # GUARD: restore only into an empty target (no database.sqlite yet), so a
+      # routine re-run never extracts the backup over the live DB + certificates.
+      - name: Check whether a live NPM database already exists (restore guard)
+        ansible.builtin.stat:
+          path: "{{ host_directory }}/data/database.sqlite"
+        register: npm_db
+
+      - name: Refuse to deploy an empty NPM when no backup is staged
+        ansible.builtin.fail:
+          msg: >-
+            {{ host_directory }}/data has no database.sqlite and no backup.tar.gz is staged
+            in {{ local_backup_folder }}. Stage the backup and re-run, or pass
+            -e allow_empty_deploy=true for a deliberate fresh install.
+        when:
+          - not npm_db.stat.exists
+          - (local_backup_folder + '/backup.tar.gz') is not file
+          - not (allow_empty_deploy | default(false) | bool)
+
       - block:
         - name: Copy the archive to the remote machine
           ansible.builtin.copy:
@@ -30,7 +50,9 @@
           ansible.builtin.command: >
             tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}
           become: true
-        when: local_backup_folder is defined and local_backup_folder is not none
+        when:
+          - (local_backup_folder + '/backup.tar.gz') is file
+          - not npm_db.stat.exists
 
       - name: Create Dockerfile for the custom nginx-proxy-manager image
         # this image adds the atd package and a watchdog script
