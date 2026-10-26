@@ -44,6 +44,7 @@
     src: "{{ templates_dir }}/librechat/librechat.yaml.j2"
     dest: "{{ librechat_config_dir }}/librechat.yaml"
     mode: '0644'
+  register: librechat_yaml
 
 - name: Run MongoDB
   # Image MUST be mongodb/mongodb-community-server (multi-arch incl. arm64); the Docker
@@ -130,12 +131,15 @@
       # 0.0.0.0 bind so LAN clients reach vhost2:3080 directly (no proxy).
       - "{{ web_port }}:3080"
     restart_policy: unless-stopped
+    # A changed .env re-creates the container by itself; a changed librechat.yaml
+    # (bind mount) is only read at start, so restart for it explicitly.
+    restart: "{{ librechat_yaml.changed }}"
     detach: true
 
 - name: LibreChat first-run reminder
   ansible.builtin.debug:
     msg: >-
-      LibreChat (LAN-only) at {{ librechat_base_url }}. Register your account,
-      then re-run with -e librechat_allow_registration=false. MCP wired:
+      LibreChat (LAN-only) at {{ librechat_base_url }}. Registration open:
+      {{ librechat_allow_registration | bool }}. MCP wired:
       {{ librechat_enable_mcp | bool }}. Daily ingest timer
       {{ docs_bridge_ingest_oncalendar }} (journalctl -u docs-bridge-ingest).

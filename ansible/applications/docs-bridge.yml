@@ -30,8 +30,8 @@
 #   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K
 #   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e run_sync=true                 # + one-shot ingest
 #   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e run_restore=true               # opt-in restore (qdrant + manifest + mongo)
-#   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e librechat_enable_mcp=true      # 2.2: wire LibreChat->/mcp
-#   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e librechat_allow_registration=false  # close signups
+#   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e librechat_enable_mcp=false     # unwire LibreChat->/mcp (default: wired)
+#   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e librechat_allow_registration=true   # open signups temporarily (default: closed)
 #   ./run-playbook.sh vhost2 docs-bridge ~/.ssh/id_ed25519_vhost -K -e rebuild_images=true --tags prep,images,server  # rebuild server image + apply runtime changes
 - hosts: homelab
   become: true
@@ -116,8 +116,11 @@
     librechat_base_url: "http://{{ librechat_lan_ip }}:{{ web_port }}"
     librechat_dir: "{{ host_directory }}/librechat"
     librechat_config_dir: "{{ librechat_dir }}/config"
-    librechat_enable_mcp: false        # 2.2: wire the docs-bridge mcpServers block + token
-    librechat_allow_registration: true # open for the first account; flip false after
+    # Both files are re-rendered on EVERY run, so these defaults must match the live
+    # state: a re-run with the old first-deploy defaults (mcp off, signups open) wiped
+    # the docs-bridge MCP block and re-opened registration (Oct 2026 librechat bump).
+    librechat_enable_mcp: true          # docs-bridge mcpServers block + DOCS_BRIDGE_TOKEN
+    librechat_allow_registration: false # -e librechat_allow_registration=true to add an account
     # Session lifetime (ms expressions). Long access token so a LAN session isn't
     # bounced to login on brief inactivity (the http-origin refresh cookie is flaky).
     librechat_session_expiry: "1000 * 60 * 60 * 12"        # access token: 12h
