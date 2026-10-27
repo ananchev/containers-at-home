@@ -244,6 +244,21 @@
             here). Use for how Teamcenter 2606 works; for what changed between releases
             use teamcenter-whats-new. The 2606 API reference (SOA/AIG API docs) is not
             included yet — for API details use teamcenter-2512.
+        # 14.2 (2026-10-26): PDF guides only — no API reference and no AIG guides were
+        # published with it. The What's New pool starts at 14.3, i.e. at what changed
+        # after this release.
+        - name: teamcenter-14.2
+          dir: /data/docs/teamcenter-14.2
+          collection: teamcenter_14_2
+          description: >-
+            Siemens Teamcenter PLM, release 14.2 — installation, configuration,
+            administration, rich client, BMIDE data modelling, server and client
+            customization, and the application guides of that release. Use only for
+            questions about Teamcenter 14.2 (or sites still on 14.x); for current
+            releases use teamcenter-2512 or teamcenter-2606, and for what changed since
+            14.2 use teamcenter-whats-new. The 14.2 API reference and the Active
+            Integration Gateway (T4S/T4EA/T4O) are not included — use teamcenter-2512
+            for those.
 
     # Per-host deployment tuning — kept in this operator playbook on purpose:
     # NOT in host_vars (host facts only) and NOT in the product repo (the app
