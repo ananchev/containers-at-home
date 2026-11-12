@@ -1,4 +1,4 @@
-# Podman runtime for RHEL-family hosts (Pi 5 Rocky 10, later M2 Asahi Fedora).
+# Podman runtime for RHEL-family hosts (Pi 5 Rocky 10, M2 + M1 Asahi Fedora: vhost2, vhost).
 #
 # The fleet drives every app with community.docker.* modules. Here we expose
 # Podman through its Docker-API socket so those modules connect unchanged
@@ -116,6 +116,96 @@
         name: podman-restart.service
         enabled: true
 
+    # Optional (host var `podman_require_mounts`, a list): don't start containers on
+    # boot until these mounts are up. vhost: all bind mounts live on the USB-C
+    # enclosure (nofail mount) - if it is missing, keep containers down instead of
+    # starting them against empty directories on the internal disk.
+    - name: Make podman-restart wait for the data mounts
+      when: podman_require_mounts is defined
+      block:
+        - name: Ensure the podman-restart drop-in directory exists
+          ansible.builtin.file:
+            path: /etc/systemd/system/podman-restart.service.d
+            state: directory
+            mode: '0755'
+
+        - name: Require the data mounts before podman-restart
+          ansible.builtin.copy:
+            dest: /etc/systemd/system/podman-restart.service.d/10-require-mounts.conf
+            mode: '0644'
+            content: |
+              # Managed by Ansible (containers-at-home): containers start only once their data is mounted.
+              [Unit]
+              RequiresMountsFor={{ podman_require_mounts | join(' ') }}
+          notify: reload systemd
+
+    # Optional (host vars `podman_socket_group` + `podman_socket_users`): let these
+    # users drive the ROOTFUL Podman socket without sudo (docker ps / podman ps),
+    # like the docker group did. Root-equivalent, exactly as docker group membership.
+    # CONTAINER_HOST makes their podman CLI (and the podman-docker `docker` wrapper)
+    # a remote client of the rootful service instead of rootless podman.
+    - name: Non-root access to the rootful Podman socket
+      when: podman_socket_group is defined
+      block:
+        - name: Create the socket group
+          ansible.builtin.group:
+            name: "{{ podman_socket_group }}"
+            system: true
+
+        - name: Add the users to the socket group
+          ansible.builtin.user:
+            name: "{{ item }}"
+            groups: "{{ podman_socket_group }}"
+            append: true
+          loop: "{{ podman_socket_users | default([]) }}"
+
+        - name: Ensure the podman.socket drop-in directory exists
+          ansible.builtin.file:
+            path: /etc/systemd/system/podman.socket.d
+            state: directory
+            mode: '0755'
+
+        - name: Hand the socket (and its directory) to the group
+          ansible.builtin.copy:
+            dest: /etc/systemd/system/podman.socket.d/10-group.conf
+            mode: '0644'
+            content: |
+              # Managed by Ansible (containers-at-home)
+              [Socket]
+              SocketGroup={{ podman_socket_group }}
+              SocketMode=0660
+              DirectoryMode=0750
+          notify: [reload systemd, restart podman socket]
+
+        - name: Keep /run/podman traversable by the group (podman itself creates it 0700)
+          ansible.builtin.copy:
+            dest: /etc/tmpfiles.d/podman-socket-group.conf
+            mode: '0644'
+            content: |
+              # Managed by Ansible (containers-at-home)
+              z /run/podman 0750 root {{ podman_socket_group }} -
+
+        - name: Point the group's podman CLI at the rootful socket
+          ansible.builtin.copy:
+            dest: /etc/profile.d/podman-remote.sh
+            mode: '0644'
+            content: |
+              # Managed by Ansible (containers-at-home): members of {{ podman_socket_group }} talk to rootful podman.
+              if [ "$(id -u)" -ne 0 ] && id -nG | grep -qw {{ podman_socket_group }}; then
+                export CONTAINER_HOST=unix:///run/podman/podman.sock
+              fi
+
+        - name: Silence the podman-docker "Emulate Docker CLI" notice
+          ansible.builtin.file:
+            path: /etc/containers/nodocker
+            state: touch
+            mode: '0644'
+            modification_time: preserve
+            access_time: preserve
+
+    - name: Apply systemd drop-ins before the socket is used
+      ansible.builtin.meta: flush_handlers
+
     - name: Materialise the /run/docker.sock compatibility symlink now
       # podman-docker ships this as a tmpfiles.d entry; create it without a reboot
       # so community.docker can connect to unix://var/run/docker.sock immediately.
@@ -127,6 +217,10 @@
       changed_when: false
 
   handlers:
+    - name: reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
     - name: restart podman socket
       ansible.builtin.systemd:
         name: podman.socket

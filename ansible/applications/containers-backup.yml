@@ -30,8 +30,8 @@
             repo: 'https://github.com/ananchev/containers-at-home.git' 
             dest: "{{ host_directory }}"
 
-      # Mixed fleet: Docker hosts (fed/unas/bnod/vhost) + Podman-via-compat-socket
-      # hosts (vhost2). docker_image (source: build) drives the plain Docker-compat
+      # Mixed fleet: Docker hosts (fed/unas/bnod) + Podman-via-compat-socket
+      # hosts (vhost2, vhost, pi5). docker_image (source: build) drives the plain Docker-compat
       # build API that BOTH runtimes expose; docker_image_build negotiates with a
       # native Docker client and fails on Podman ("Cannot determine Docker client
       # information"). This matches every other app playbook. force_source rebuilds

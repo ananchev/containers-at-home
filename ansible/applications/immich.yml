@@ -64,11 +64,29 @@
             - "{{ host_directory }}/postgres:/var/lib/postgresql/data:Z"
 
       - name: Wait for Postgres to be ready
-        pause:
-          seconds: 5
+        ansible.builtin.command: >
+          docker exec {{ application }}-postgres
+          pg_isready -U {{ immich_db_username }} -d {{ immich_db_database }}
+        register: pg_ready
+        until: pg_ready.rc == 0
+        retries: 30
+        delay: 2
+        changed_when: false
+
+      # GUARD: application_data/ is the live backup share, so a
+      # staged dump is present on EVERY run. Restore only into an EMPTY database
+      # (true rebuild); a routine re-run against a live instance must never replay
+      # the last dump over it. Version-independent check: any table in `public`.
+      - name: Check whether the Immich database is already populated (restore guard)
+        ansible.builtin.command: >
+          docker exec {{ application }}-postgres
+          psql -tAc "SELECT count(*) > 0 FROM information_schema.tables WHERE table_schema = 'public'"
+          -U {{ immich_db_username }} -d {{ immich_db_database }}
+        register: immich_db_populated
+        changed_when: false
 
       - name: Restore database from backup
-        when: immich_backup_exists
+        when: immich_backup_exists and (immich_db_populated.stdout | trim) != 't'
         block:
           - name: Restore the immich database from backup
             ansible.builtin.shell: |

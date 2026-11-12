@@ -4,3 +4,12 @@ ansible_user: ananchev
 ssh_private_key: "{{ vhost_ssh_private_key }}"
 docker_data_root: /nvme/containers   # local NVMe for containes databases, cache, etc.
 filestore_root: /nas                 # bulk storage over NFS
+# Podman behind its Docker-API socket (pre-requisites-podman.yml); community.docker.* drive it.
+# Migrated from docker-ce (2026-11). Root is the 95G internal btrfs: keep Podman's native
+# /var/lib/containers/storage (podman_graphroot UNSET); bind-mount data stays on the enclosure.
+container_runtime: podman
+# All bind mounts live on the USB-C NVMe enclosure (nofail mount): no containers without it.
+podman_require_mounts: [/nvme/containers]
+# docker-group equivalent: run docker/podman ps etc. against the rootful socket.
+podman_socket_group: podman
+podman_socket_users: [ananchev]
