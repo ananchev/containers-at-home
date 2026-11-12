@@ -1,12 +1,10 @@
 - hosts: homelab
   gather_facts: False
-  vars_files:
-    - vault.yml
 
   tasks:
     - name: Run OS-specific pre-requisites
       debug:
-        msg: "Use pre-requisites-coreos.yml for CoreOS hosts or pre-requisites-unraid.yml for Unraid"
+        msg: "Use hosts/pre-requisites-coreos.yml for CoreOS hosts or hosts/pre-requisites-unraid.yml for Unraid"
 
     # - name: Unconditionally reboot the machine with all defaults
     #   ansible.builtin.reboot:

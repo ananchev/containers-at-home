@@ -1,0 +1,101 @@
+# Boot safeguard for remote Asahi hosts (vhost): turn a kernel oops into an automatic
+# reboot instead of a hang that needs a power cycle, and report it on Telegram.
+#
+# Why: on 2026-11-12 a 7.2 kernel oops at ~5s into boot (dwc3-apple/IOMMU probe race,
+# list_add corruption in a udev worker) left vhost stuck. systemd (PID 1) kept running
+# and kept petting the hardware watchdog, so the watchdog never fired.
+#   panic_on_oops=1  -> any oops becomes a panic
+#   panic=10         -> reboot 10s after a panic
+#   boot-alert       -> on the next boot, Telegram message if the previous boot did not
+#                       shut down cleanly or logged an oops (uses the home notifier bot)
+#
+# Run with:  ./run-playbook.sh vhost hosts/boot-safeguard <key>
+# Kernel args take effect on the next boot; grubby also stores them as the default
+# for future kernels. Undo: grubby --update-kernel=ALL --remove-args="panic_on_oops panic".
+- hosts: homelab
+  become: true
+  gather_facts: false
+  vars:
+    kernel_panic_args: "panic_on_oops=1 panic=10"
+
+  tasks:
+    - name: Read the current kernel args of all boot entries
+      ansible.builtin.command: grubby --info=ALL
+      register: grubby_info
+      changed_when: false
+
+    - name: Add the panic-reboot kernel args to all kernels (and future ones)
+      ansible.builtin.command: grubby --update-kernel=ALL --args="{{ kernel_panic_args }}"
+      when: >-
+        (grubby_info.stdout_lines | select('match', '^args=') | reject('search', 'panic_on_oops=1')
+        | list | length > 0)
+        or (grubby_info.stdout_lines | select('match', '^args=') | reject('search', 'panic=10')
+        | list | length > 0)
+
+    - name: Archive EFI pstore crash logs on boot (if the firmware keeps any)
+      ansible.builtin.systemd:
+        name: systemd-pstore.service
+        enabled: true
+
+    - name: Telegram credentials for boot-alert (root only)
+      ansible.builtin.copy:
+        dest: /etc/boot-alert.env
+        owner: root
+        group: root
+        mode: '0600'
+        content: |
+          # Managed by Ansible (containers-at-home, boot-safeguard.yml)
+          TELEGRAM_TOKEN="{{ home_notifier_telegram_token }}"
+          CHAT_ID="{{ home_notifier_telegram_chat_id }}"
+      no_log: true
+      notify: send test alert
+
+    - name: Install the boot-alert script
+      ansible.builtin.copy:            # plain file: no secrets/vars inside (they're in /etc/boot-alert.env)
+        src: boot-alert.sh           # hosts/files/boot-alert.sh
+        dest: /usr/local/sbin/boot-alert
+        mode: '0755'
+      notify: send test alert
+
+    - name: Install the boot-alert service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/boot-alert.service
+        mode: '0644'
+        content: |
+          # Managed by Ansible (containers-at-home, boot-safeguard.yml)
+          [Unit]
+          Description=Telegram alert if the previous boot ended uncleanly
+          Wants=network-online.target
+          After=network-online.target systemd-pstore.service systemd-journal-flush.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/boot-alert
+          TimeoutStartSec=15min
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: reload systemd
+
+    - name: Enable boot-alert
+      ansible.builtin.systemd:
+        name: boot-alert.service
+        enabled: true
+        daemon_reload: true
+
+    - name: Show the kernel args now stored for the default kernel
+      ansible.builtin.command: grubby --info=DEFAULT
+      register: grubby_default
+      changed_when: false
+
+    - name: Kernel args (effective after the next reboot)
+      ansible.builtin.debug:
+        msg: "{{ grubby_default.stdout_lines | select('match', '^(kernel|args)=') | list }}"
+
+  handlers:
+    - name: reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: send test alert
+      ansible.builtin.command: /usr/local/sbin/boot-alert --test

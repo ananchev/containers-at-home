@@ -7,6 +7,7 @@ if [ "$#" -lt 3 ]; then
   echo "Error: Missing arguments."
   echo "Usage: $0 <inventory_name> <app_name> <private_key_file> [extra_options...]"
   echo "Example: $0 unas rustdesk /path/to/private_key.pem"
+  echo "         $0 vhost hosts/boot-safeguard /path/to/private_key.pem   (host management)"
   exit 1
 fi
 
@@ -14,7 +15,12 @@ INV_NAME=$1
 APP_NAME=$2
 PRIVATE_KEY_FILE=$3
 INV_PATH="ansible/inventories/${INV_NAME}/hosts"
-PLAYBOOK_FILE="ansible/applications/${APP_NAME}.yml"
+# Containers live in ansible/applications/<app>.yml; host management (OS-level, not
+# containers) in ansible/hosts/<name>.yml, addressed as hosts/<name>.
+case "$APP_NAME" in
+  hosts/*) PLAYBOOK_FILE="ansible/${APP_NAME}.yml" ;;
+  *)       PLAYBOOK_FILE="ansible/applications/${APP_NAME}.yml" ;;
+esac
 
 # Automatic Symlink Maintenance
 # This ensures that any inventory folder has access to the global group_vars

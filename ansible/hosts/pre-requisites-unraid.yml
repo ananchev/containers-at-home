@@ -1,7 +1,5 @@
 - hosts: unraid
   gather_facts: False
-  vars_files:
-    - vault.yml
 
   tasks:
     - name: Install requests module with pip system-wide

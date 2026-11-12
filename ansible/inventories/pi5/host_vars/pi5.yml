@@ -18,5 +18,5 @@ docs_bridge_data_root: /data
 container_runtime: podman
 # Tiny 30GB root + big /data NVMe -> relocate Podman's image/container storage
 # onto /data so qdrant's from-source build layers don't overrun root. Hosts whose
-# root is already the big disk leave this unset (see pre-requisites-podman.yml).
+# root is already the big disk leave this unset (see hosts/pre-requisites-podman.yml).
 podman_graphroot: /data/containers/storage

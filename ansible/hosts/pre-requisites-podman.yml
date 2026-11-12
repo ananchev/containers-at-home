@@ -7,9 +7,9 @@
 #   podman.socket           -> the Docker-compatible API endpoint
 #   podman-restart.service  -> reproduces `restart_policy: unless-stopped` on boot
 #
-# Run with:  ./run-playbook.sh pi5 ../pre-requisites-podman <key>   (see note below)
+# Run with:  ./run-playbook.sh pi5 hosts/pre-requisites-podman <key>   (see note below)
 # or directly:  ansible-playbook -i inventories/pi5/hosts --private-key <key> \
-#                 --ask-vault-pass pre-requisites-podman.yml
+#                 --ask-vault-pass hosts/pre-requisites-podman.yml
 - hosts: homelab
   become: true
   gather_facts: false

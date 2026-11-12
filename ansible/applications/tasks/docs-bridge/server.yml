@@ -8,7 +8,7 @@
 # the published port.
 
 # Publishing on the LAN IP (not loopback) means the port must be open in the host's
-# firewall. Mirror the pre-requisites-podman approach: only act when firewalld runs,
+# firewall. Mirror the hosts/pre-requisites-podman approach: only act when firewalld runs,
 # and add both permanently (persist across reboot) and at runtime (effective now), so
 # no reload/handler is needed and the task is idempotent (ALREADY_ENABLED = no change).
 - name: Detect whether firewalld is running

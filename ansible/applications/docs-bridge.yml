@@ -20,7 +20,7 @@
 # exporter stage. Build tasks have no force_source, so they SKIP when the image is
 # already present (e.g. after a manual docker load). LibreChat/mongo/meili are stock
 # multi-arch images (app_versions: librechat, librechat-mongo, librechat-meili).
-# Runtime: Podman via its Docker-API socket (pre-requisites-podman.yml).
+# Runtime: Podman via its Docker-API socket (hosts/pre-requisites-podman.yml).
 # Image pin: app_versions['docs-bridge-qdrant'].image (vaulted app_versions.yml).
 # Secrets:   docs_bridge_secrets.bearer_token -> server DOCS_BRIDGE_TOKEN (+ the MCP
 #            header when librechat_enable_mcp); docs_bridge_secrets.agent_tokens (dict

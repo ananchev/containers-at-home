@@ -23,4 +23,4 @@ docs_bridge_data_root: /data/docs-bridge-payload
 container_runtime: podman
 # podman_graphroot intentionally UNSET: root IS the big disk here, so keep
 # Podman's native /var/lib/containers/storage (the Pi relocates because its root
-# is tiny). See pre-requisites-podman.yml.
+# is tiny). See hosts/pre-requisites-podman.yml.

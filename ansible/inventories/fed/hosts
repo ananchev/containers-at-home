@@ -3,3 +3,6 @@ fed ansible_host=192.168.2.8
 
 [fedora]
 fed
+
+[coreos]
+fed
