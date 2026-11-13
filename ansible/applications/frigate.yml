@@ -1,0 +1,193 @@
+# Frigate NVR + frigate-notify (Telegram) for the front terrace camera, on unas.
+#
+#   frigate         24/7 recording of the 4K H.265 main stream (stream copy, no transcode),
+#                   person detection on the 640x360 H.264 substream with OpenVINO on the
+#                   N305 iGPU, alert/detection clips with pre/post capture.
+#   frigate-notify  Telegram message with snapshot for every Frigate *alert* (person),
+#                   suppressed during quiet hours (frigate_notify_quiet_*).
+#
+# Storage: recordings/clips go to the external USB HDD mounted by Unassigned Devices at
+# {{ frigate_media_root }}. The play REFUSES to run if that is not a mountpoint: on Unraid an
+# unmounted /mnt/disks/<x> is RAM (rootfs), and Frigate would fill it.
+# Frigate's /config (config.yml, frigate.db, auth secret) lives under docker_data_root.
+#
+# Backup (backups/backup_definitions.yml, application: frigate): nightly backup.tar.gz of
+# /config (online sqlite copy of frigate.db, no model_cache) + the YOLOv9 .onnx as its own
+# file. The video itself is NOT backed up (rolling buffer).
+# Restore: stage those two files in {{ application_data }}/frigate/ ; on a host with no
+# config.yml yet the play extracts backup.tar.gz and copies the model instead of seeding /
+# building. A live install (config.yml present) is never overwritten by a restore.
+#
+# config.yml is only SEEDED from the template (first deploy, no backup staged). Frigate's own
+# UI edits that file (zones, masks, users' settings), so a re-run must not overwrite it. To
+# re-seed from the template on purpose: -e frigate_reset_config=true (old file kept as backup).
+#
+# Detector model: YOLOv9 ONNX in /config/model_cache - kept, restored from the staged
+# backup, or exported on the host (applications/tasks/frigate/model.yml).
+#
+# Needs in the vault:  frigate_camera_password, home_notifier_telegram_token,
+#                      home_notifier_telegram_chat_id
+# Needs in app_versions: frigate, frigate-notify
+#
+# Run:  ./run-playbook.sh unas frigate <key>
+# First login: user `admin`, password printed once in `docker logs frigate`.
+- hosts: homelab
+  become: true
+  gather_facts: false
+  vars:
+    application: frigate
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    docker_network: "{{ application }}-net"
+    local_backup_folder: "{{ application_data }}/{{ application }}"
+    templates_dir: "{{ playbook_dir }}/../_templates"
+
+    frigate_media_root: /mnt/disks/surveillance
+    frigate_camera_ip: 192.168.5.31
+    frigate_camera_user: admin
+
+    # YOLOv9 variant (t/s/m/c/e) and input size. s@320 is Frigate's recommended start.
+    frigate_yolo_size: s
+    frigate_yolo_imgsize: 320
+    frigate_yolo_model_file: "yolov9-{{ frigate_yolo_size }}-{{ frigate_yolo_imgsize }}.onnx"
+
+    # Retention (days). Continuous ~70 GB/day at the camera's ~6.4 Mbps -> 7 days ~490 GB
+    # of the 1.8 TB disk.
+    frigate_retain_continuous_days: 7
+    frigate_retain_alerts_days: 30       # person events
+    frigate_retain_detections_days: 14
+    frigate_pre_capture: 10              # seconds before the event
+    frigate_post_capture: 20             # seconds after the event
+
+    # Telegram alerts only OUTSIDE this window (i.e. evening/night 18:00-06:00).
+    frigate_notify_quiet_start: "06:00"
+    frigate_notify_quiet_end: "18:00"
+
+    frigate_public_url: "http://{{ lan_addresses.unas }}:{{ application_services['frigate'].ports.web }}"
+
+  tasks:
+    - name: Run only on the designated host
+      block:
+      - name: Check that the surveillance disk is mounted
+        ansible.builtin.command: findmnt -n -o SOURCE,FSTYPE --mountpoint {{ frigate_media_root }}
+        register: media_mount
+        changed_when: false
+        failed_when: false
+
+      - name: Refuse to record into RAM when the surveillance disk is not mounted
+        ansible.builtin.fail:
+          msg: >-
+            {{ frigate_media_root }} is not a mountpoint. Mount the surveillance disk in
+            Unassigned Devices (with Automount on) and re-run.
+        when: media_mount.rc != 0
+
+      - name: Create directories
+        ansible.builtin.file:
+          path: "{{ item }}"
+          state: directory
+          mode: '0755'
+        loop:
+          - "{{ host_directory }}/config"
+          - "{{ host_directory }}/notify"
+          - "{{ frigate_media_root }}/frigate"
+
+      - name: Check whether a Frigate config already exists (seed-only / restore guard)
+        ansible.builtin.stat:
+          path: "{{ host_directory }}/config/config.yml"
+        register: frigate_config
+
+      # GUARD: restore only into an empty target, so a routine re-run never extracts the
+      # backup over the live config/DB (application_data is the live dump mirror).
+      - name: Restore /config from the staged backup
+        when:
+          - not frigate_config.stat.exists
+          - (local_backup_folder + '/backup.tar.gz') is file
+        block:
+          - name: Copy the backup archive to the remote machine
+            ansible.builtin.copy:
+              src: "{{ local_backup_folder }}/backup.tar.gz"
+              dest: /tmp/frigate-backup.tar.gz
+              mode: '0600'
+          - name: Extract the backup into the config folder
+            ansible.builtin.command: tar -xzf /tmp/frigate-backup.tar.gz -C {{ host_directory }}/config
+            register: frigate_restored
+          - name: Remove the copied archive
+            ansible.builtin.file:
+              path: /tmp/frigate-backup.tar.gz
+              state: absent
+
+      # Seed only when there was no config and none came from a restore. (Don't re-register
+      # frigate_config inside the restore block: a skipped task still overwrites its register.)
+      - name: Seed the Frigate config from the template
+        ansible.builtin.template:
+          src: "{{ templates_dir }}/frigate/config.yml.j2"
+          dest: "{{ host_directory }}/config/config.yml"
+          mode: '0644'
+          backup: true
+        when: >-
+          (frigate_reset_config | default(false) | bool)
+          or (not frigate_config.stat.exists and frigate_restored is skipped)
+        register: frigate_config_written
+
+      - name: Detector model (YOLOv9 ONNX) - keep, restore from backup, or export
+        ansible.builtin.import_tasks: tasks/frigate/model.yml
+
+      - name: Write the frigate-notify config (contains the Telegram token)
+        ansible.builtin.template:
+          src: "{{ templates_dir }}/frigate/frigate-notify.yml.j2"
+          dest: "{{ host_directory }}/notify/config.yml"
+          mode: '0600'
+        no_log: true
+        register: notify_config_written
+
+      - name: Create the docker network for the frigate containers
+        community.docker.docker_network:
+          name: "{{ docker_network }}"
+          driver: bridge
+          state: present
+
+      - name: Run Frigate
+        community.docker.docker_container:
+          name: frigate
+          hostname: frigate
+          image: "{{ app_versions['frigate']['image'] }}"
+          network_mode: "{{ docker_network }}"
+          detach: true
+          restart_policy: unless-stopped
+          # restart a running Frigate when its config was (re)seeded or the model replaced
+          restart: "{{ frigate_config_written is changed or yolo_restored is changed or yolo_built is changed }}"
+          shm_size: 256m              # 1 camera, detect at 640x360 -> ~60 MB needed, room for 2 more
+          devices:
+            - /dev/dri:/dev/dri       # VAAPI decode + OpenVINO GPU detector (i3-N305 iGPU)
+          ports:
+            # Only the authenticated UI/API is published. 5000 (unauthenticated API, used by
+            # frigate-notify over the docker network) and 8554 (unauthenticated RTSP restream)
+            # stay internal.
+            - "{{ application_services['frigate'].ports.web }}:8971"
+          volumes:
+            - "{{ host_directory }}/config:/config"
+            - "{{ frigate_media_root }}/frigate:/media/frigate"
+          mounts:
+            - type: tmpfs             # recording segment cache, recommended by Frigate
+              target: /tmp/cache
+              tmpfs_size: 1g
+            - source: /etc/localtime
+              target: /etc/localtime
+              type: bind
+              read_only: true
+          env:
+            FRIGATE_RTSP_PASSWORD: "{{ frigate_camera_password }}"
+
+      - name: Run frigate-notify
+        community.docker.docker_container:
+          name: frigate-notify
+          image: "{{ app_versions['frigate-notify']['image'] }}"
+          network_mode: "{{ docker_network }}"
+          detach: true
+          restart_policy: unless-stopped
+          restart: "{{ notify_config_written is changed }}"
+          volumes:
+            - "{{ host_directory }}/notify/config.yml:/app/config.yml:ro"
+          env:
+            TZ: Europe/Berlin         # quiet hours are evaluated in this timezone
+
+      when: inventory_hostname in application_services['frigate'].hosts

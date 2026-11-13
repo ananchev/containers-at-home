@@ -1,0 +1,80 @@
+---
+# Detector model for Frigate's OpenVINO detector: YOLOv9 exported to ONNX, in
+# {{ host_directory }}/config/model_cache/{{ frigate_yolo_model_file }}.
+#
+# Order: keep the model if present -> else restore it from the staged backup
+# (application_data/frigate/, written nightly by backups/backup_definitions.yml) -> else
+# export it on the host with BuildKit (_templates/frigate/yolov9-export.Dockerfile,
+# ~3 min on unas; the build cache, ~2.4 GB, is pruned afterwards).
+#
+# Registers yolo_restored / yolo_built so the play can restart a running Frigate when
+# the model was replaced. To rebuild on purpose: delete the .onnx, or change
+# frigate_yolo_size / frigate_yolo_imgsize in applications/frigate.yml.
+
+- name: Create the model cache folder
+  ansible.builtin.file:
+    path: "{{ host_directory }}/config/model_cache"
+    state: directory
+    mode: '0755'
+
+- name: Check whether the YOLOv9 model is present
+  ansible.builtin.stat:
+    path: "{{ host_directory }}/config/model_cache/{{ frigate_yolo_model_file }}"
+  register: yolo_model
+
+- name: Restore the YOLOv9 model from the staged backup
+  ansible.builtin.copy:
+    src: "{{ local_backup_folder }}/{{ frigate_yolo_model_file }}"
+    dest: "{{ host_directory }}/config/model_cache/{{ frigate_yolo_model_file }}"
+    mode: '0644'
+  when:
+    - not yolo_model.stat.exists
+    - (local_backup_folder + '/' + frigate_yolo_model_file) is file
+  register: yolo_restored
+
+- name: Export the YOLOv9 model with BuildKit (one-off)
+  when:
+    - not yolo_model.stat.exists
+    - yolo_restored is skipped
+  block:
+    - name: Create a temporary build context
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: -yolov9
+      register: yolo_ctx
+
+    - name: Copy the export Dockerfile
+      ansible.builtin.copy:
+        src: "{{ templates_dir }}/frigate/yolov9-export.Dockerfile"
+        dest: "{{ yolo_ctx.path }}/Dockerfile"
+        mode: '0644'
+
+    - name: Build and export the ONNX model
+      ansible.builtin.command: >-
+        docker buildx build
+        --build-arg MODEL_SIZE={{ frigate_yolo_size }}
+        --build-arg IMG_SIZE={{ frigate_yolo_imgsize }}
+        --output type=local,dest={{ yolo_ctx.path }}/out
+        {{ yolo_ctx.path }}
+      async: 3600
+      poll: 30
+
+    - name: Install the exported model
+      ansible.builtin.copy:
+        remote_src: true
+        src: "{{ yolo_ctx.path }}/out/{{ frigate_yolo_model_file }}"
+        dest: "{{ host_directory }}/config/model_cache/{{ frigate_yolo_model_file }}"
+        mode: '0644'
+      register: yolo_built
+  always:
+    - name: Remove the build context
+      ansible.builtin.file:
+        path: "{{ yolo_ctx.path }}"
+        state: absent
+      when: yolo_ctx.path is defined
+
+    # The export pulls python + torch + yolov9 deps that nothing else needs. Other image
+    # builds on the host just rebuild their cache.
+    - name: Prune the build cache
+      ansible.builtin.command: docker buildx prune -af
+      changed_when: false

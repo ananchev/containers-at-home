@@ -265,6 +265,44 @@ backup_definitions:
       - source_path: /tmp/backup.tar.gz
         target_filename: backup.tar.gz
 
+  # Frigate NVR (unas): /config only - config.yml (zones/masks/settings edited in the UI),
+  # frigate.db (events, review items, users) and the .jwt_secret auth key. frigate.db is
+  # copied with sqlite's online backup API (consistent while Frigate writes; a plain tar of
+  # the live WAL db is not). model_cache is excluded from the tar; the YOLOv9 export is
+  # copied as its own file instead, so its unchanged bytes are stored once in the mirror
+  # (rsync -c) and a restore skips the ~10 min rebuild. Recordings on the USB disk are
+  # NOT backed up (rolling buffer). frigate-notify is stateless (config rendered from repo).
+  # Restore: applications/frigate.yml (restore-only-into-empty-target guard).
+  # The model is copied host-side by glob, not via copy_actions: a docker cp of a missing
+  # file hard-fails the host's whole remaining backup loop (see guacamole note above).
+  # docker_data_root needs `| default('')`: this list is rendered on every host (see the
+  # docs-bridge note at the top), not only on unas.
+  - application: frigate
+    container: frigate
+    backup_commands:
+      - python3 -c "import sqlite3; d = sqlite3.connect('/tmp/frigate.db'); sqlite3.connect('/config/frigate.db').backup(d); d.close()"
+      - >
+        tar -czf /tmp/backup.tar.gz
+          --exclude=./model_cache
+          --exclude=./frigate.db
+          --exclude=./frigate.db-wal
+          --exclude=./frigate.db-shm
+          -C /config .
+          -C /tmp frigate.db
+      - rm -f /tmp/frigate.db
+    copy_actions:
+      - source_path: /tmp/backup.tar.gz
+        target_filename: backup.tar.gz
+    host_commands:
+      - |
+        dest="{{ backups_directory }}/{{ backup_timestamp }}/frigate"
+        found=0
+        for f in {{ docker_data_root | default('') }}/frigate/config/model_cache/yolov9-*.onnx; do
+          [ -f "$f" ] || continue
+          cp "$f" "$dest/" && found=1
+        done
+        [ "$found" = 1 ] || echo "WARNING: no YOLOv9 .onnx in frigate model_cache - model NOT backed up" >&2
+
   - application: borg-ui
     container: borg-ui
     backup_commands:

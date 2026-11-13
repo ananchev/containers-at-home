@@ -42,6 +42,7 @@ application_services:
   immich:              { hosts: [vhost], ports: { web: 2283 } }
   inadyn:              { hosts: [pi5] }
   influxdb:            { hosts: [pi5], ports: { web: 8086 } }
+  frigate:             { hosts: [unas], ports: { web: 8971 } }        # + frigate-notify; 5000/8554 internal only
   jellyfin:            { hosts: [unas], ports: { web: 8096, discovery: 7359 } }
   memos:               { hosts: [unas], ports: { web: 5230 } }
   mosquitto:           { hosts: [pi5], ports: { mqtt: 1883 } }

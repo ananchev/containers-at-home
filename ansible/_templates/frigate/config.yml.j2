@@ -1,0 +1,144 @@
+# Frigate {{ app_versions['frigate']['image'].split(':')[-1] }} config — SEEDED by containers-at-home
+# (ansible/_templates/frigate/config.yml.j2). After the first deploy this file belongs to
+# Frigate: zones/masks/settings edited in the web UI are saved here, and re-running the
+# playbook does NOT overwrite it (use -e frigate_reset_config=true to re-seed).
+#
+# Camera: Reolink 4K on {{ frigate_camera_ip }}
+#   main  Preview_01_main  3840x2160 H.265 25fps  -> recording (stream copy)
+#   sub   Preview_01_sub    640x360  H.264 10fps  -> detection
+# Password comes from the env var FRIGATE_RTSP_PASSWORD (vault: frigate_camera_password).
+
+mqtt:
+  enabled: true
+  host: {{ lan_addresses.pi5 }}            # mosquitto (anonymous) - frigate-notify listens here
+  port: {{ application_services['mosquitto'].ports.mqtt }}
+  topic_prefix: frigate
+  client_id: frigate
+
+auth:
+  enabled: true                           # first start: user admin, password in `docker logs frigate`
+
+tls:
+  enabled: false                          # plain http on the LAN; put a reverse proxy in front for TLS
+
+detectors:
+  ov:
+    type: openvino
+    device: GPU                           # Intel i3-N305 iGPU
+
+# YOLOv9-{{ frigate_yolo_size }} {{ frigate_yolo_imgsize }}x{{ frigate_yolo_imgsize }} (Frigate's recommended OpenVINO model), exported to ONNX
+# by the playbook (_templates/frigate/yolov9-export.Dockerfile). Fallback if it ever
+# misbehaves - the bundled SSDLite model:
+#   width: 300, height: 300, input_tensor: nhwc, input_pixel_format: bgr,
+#   path: /openvino-model/ssdlite_mobilenet_v2.xml, labelmap_path: /openvino-model/coco_91cl_bkgr.txt
+model:
+  model_type: yolo-generic
+  width: {{ frigate_yolo_imgsize }}
+  height: {{ frigate_yolo_imgsize }}
+  input_tensor: nchw
+  input_dtype: float
+  path: /config/model_cache/{{ frigate_yolo_model_file }}
+  labelmap_path: /labelmap/coco-80.txt
+
+ffmpeg:
+  # CPU decode for the 640x360 detect stream (cheap). Frigate's recommended preset-vaapi fails on
+  # this Reolink: the Intel VAAPI decoder can't follow its mid-stream parameter changes ("PPS
+  # changed between slices") -> detect ffmpeg crashed every ~5 min ("Failed to sync surface").
+  # Detection inference still runs on the iGPU (OpenVINO). Found 2026-11-13.
+  hwaccel_args: []
+
+go2rtc:
+  streams:
+    terrace:
+      - rtsp://{{ frigate_camera_user }}:{FRIGATE_RTSP_PASSWORD}@{{ frigate_camera_ip }}:554/Preview_01_main
+    terrace_sub:
+      - rtsp://{{ frigate_camera_user }}:{FRIGATE_RTSP_PASSWORD}@{{ frigate_camera_ip }}:554/Preview_01_sub
+    # Live view for every browser (desktop Firefox can't play H.265): 4K H.265 -> 1080p H.264,
+    # started by go2rtc only while someone watches. CPU decode (~90% of one core) + iGPU
+    # scale/encode. Why not full GPU: the VAAPI HEVC decoder breaks on the Reolink's mid-stream
+    # PPS changes (filter reinit -38 -> ffmpeg exits after 4-40 s); go2rtc's built-in
+    # `#video=h264#hardware` fails too ("hwupload: A hardware device reference is required").
+    # No -fflags nobuffer / -flags low_delay: low_delay multiplies the HEVC decode errors.
+    # Timing: the Reolink sends ~24.5 fps (not 25) in bursts, and its own timestamps are bunched
+    # too. Wallclock input + fps=25 gives a smooth constant 25 fps locked to real time (repeats
+    # a frame ~2x/s). Stamping frames N/25 instead runs ahead of the camera -> the browser buffer
+    # drains every ~20 s -> stalls/dropped frames in Firefox. Found 2026-11-13.
+    terrace_h264:
+      - ffmpeg:terrace#input=vaapi_rtsp#video=h264_1080_vaapi
+  ffmpeg:
+    vaapi_rtsp: "-init_hw_device vaapi=va:/dev/dri/renderD128 -filter_hw_device va -use_wallclock_as_timestamps 1 -timeout 5000000 -user_agent go2rtc/ffmpeg -rtsp_transport tcp -i {input}"
+    h264_1080_vaapi: "-vf fps=25,setpts=PTS-STARTPTS,format=nv12,hwupload,scale_vaapi=w=1920:h=-2 -c:v h264_vaapi -g 50 -bf 0 -profile:v high -level:v 4.1 -sei:v 0"
+
+record:
+  enabled: true
+  expire_interval: 60
+  continuous:
+    days: {{ frigate_retain_continuous_days }}                               # 24/7 rolling recording
+  alerts:                                 # person events
+    pre_capture: {{ frigate_pre_capture }}
+    post_capture: {{ frigate_post_capture }}
+    retain:
+      days: {{ frigate_retain_alerts_days }}
+      mode: motion
+  detections:
+    pre_capture: {{ frigate_pre_capture }}
+    post_capture: {{ frigate_post_capture }}
+    retain:
+      days: {{ frigate_retain_detections_days }}
+      mode: motion
+
+snapshots:
+  enabled: true
+  bounding_box: true
+  retain:
+    default: {{ frigate_retain_alerts_days }}
+
+objects:
+  track:
+    - person
+  filters:
+    person:
+      min_score: 0.5
+      threshold: 0.7
+
+review:
+  alerts:
+    labels:
+      - person
+
+cameras:
+  terrace:
+    enabled: true
+    ffmpeg:
+      output_args:
+        record: preset-record-generic     # video stream copy, no audio (as the old script: -an)
+      inputs:
+        # Recording input uses preset-rtsp-generic (= restream args + -use_wallclock_as_timestamps 1
+        # -fflags +genpts+discardcorrupt -avoid_negative_ts make_zero), not preset-rtsp-restream:
+        # with the camera's own timing the segments degrade after ~1 min (10 s -> 2 s -> 0.04 s
+        # durations; ffmpeg follows the Reolink's drifting RTCP sender reports). Same fix as the
+        # old macOS recorder script. Found 2026-11-13.
+        - path: rtsp://127.0.0.1:8554/terrace
+          input_args: preset-rtsp-generic
+          roles:
+            - record
+        - path: rtsp://127.0.0.1:8554/terrace_sub
+          input_args: preset-rtsp-restream
+          roles:
+            - detect
+    detect:
+      enabled: true
+      width: 640
+      height: 360
+      fps: 5
+    live:
+      streams:                            # first = default in the UI
+        "Main 1080p (H.264)": terrace_h264
+        "Main 4K (H.265)": terrace        # Chrome 136+ / Safari only
+        Sub: terrace_sub
+
+# Config SCHEMA version (frigate/util/config.py CURRENT_CONFIG_VERSION), not the image version.
+# Must match the image used for the first deploy: without it Frigate assumes a 0.13 config and
+# runs every migration on this already-current file. On image upgrades Frigate migrates the
+# live config itself and bumps this value, so it is deliberately static here.
+version: 0.18-0

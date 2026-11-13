@@ -1,0 +1,41 @@
+# frigate-notify config — managed by containers-at-home (ansible/_templates/frigate/frigate-notify.yml.j2).
+# Overwritten on every deploy; edit the template, not this file.
+app:
+  mode: reviews                 # notify on Frigate *alerts* (= person, see review.alerts in Frigate)
+
+frigate:
+  server: http://frigate:5000   # internal unauthenticated API over the frigate-net docker network
+  public_url: {{ frigate_public_url }}   # used for the links in the Telegram message (LAN only)
+  startup_check:
+    attempts: 10
+    interval: 30
+  webapi:
+    enabled: false
+  mqtt:
+    enabled: true
+    server: {{ lan_addresses.pi5 }}
+    port: {{ application_services['mosquitto'].ports.mqtt }}
+    clientid: frigate-notify
+    topic_prefix: frigate
+
+alerts:
+  general:
+    title: Frigate
+    snap_bbox: true
+    snap_timestamp: true
+    notify_once: true           # one message per person event
+    notify_detections: false
+  # Alerts are suppressed in this window -> Telegram only {{ frigate_notify_quiet_end }}-{{ frigate_notify_quiet_start }}.
+  # Recording and event clips are NOT affected.
+  quiet:
+    start: "{{ frigate_notify_quiet_start }}"
+    end: "{{ frigate_notify_quiet_end }}"
+  labels:
+    min_score: 70
+    allow:
+      - person
+  telegram:
+    enabled: true
+    chatid: {{ home_notifier_telegram_chat_id }}
+    token: {{ home_notifier_telegram_token }}
+    send_clip: false
