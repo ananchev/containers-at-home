@@ -1,5 +1,5 @@
 - hosts: homelab
-  become: true 
+  become: true
   gather_facts: False
   vars:
     application: influxdb
@@ -21,23 +21,41 @@
           - "{{ host_directory }}/data"
           - "{{ host_directory }}/backup"
 
+      # GUARD: restore only into an empty target (no meta/meta.db yet). On a live
+      # database `influxd restore -db openhab` fails ("database already exists") after
+      # the container has been recreated, aborting the play halfway; a routine re-run
+      # -- e.g. after a version bump -- must leave the live data alone.
+      - name: Check whether a live InfluxDB already exists (restore guard)
+        ansible.builtin.stat:
+          path: "{{ host_directory }}/data/meta/meta.db"
+        register: influxdb_meta_file
+
+      - name: Refuse to deploy an empty InfluxDB when no backup is staged
+        ansible.builtin.fail:
+          msg: >-
+            {{ host_directory }}/data has no meta/meta.db and no backup.tar.gz is
+            staged in {{ local_backup_folder }}. Stage the backup and re-run, or pass
+            -e allow_empty_deploy=true for a deliberate fresh install.
+        when:
+          - not influxdb_meta_file.stat.exists
+          - (local_backup_folder + '/backup.tar.gz') is not file
+          - not (allow_empty_deploy | default(false) | bool)
+
+      - name: Set whether this run restores the backup
+        set_fact:
+          influxdb_restore: "{{ (not influxdb_meta_file.stat.exists) and ((local_backup_folder + '/backup.tar.gz') is file) }}"
+
       - name: Copy the influxdb configuration file
         ansible.builtin.copy:
           src: "{{ local_backup_folder }}/influxdb.conf"
-          dest: "{{ host_directory }}"  
+          dest: "{{ host_directory }}"
 
       - name: Add the configuration file to selinux_files_to_label
         set_fact:
           selinux_files_to_label:
           - "{{ host_directory }}/influxdb.conf"
-    
+
       - block:
-        # - name: Tar the backup folder on the controller node
-        #   ansible.builtin.command: >
-        #     tar -czvf {{ local_backup_folder }}/backup.tar.gz -C {{ local_backup_folder }} backup
-        #   become: no
-        #   delegate_to: localhost
-        #   vars:
         - name: Copy the archive to the remote machine
           ansible.builtin.copy:
             src: "{{ local_backup_folder }}/backup.tar.gz"
@@ -46,7 +64,7 @@
           ansible.builtin.command: >
             tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/backup
           become: true
-        when: local_backup_folder is defined and local_backup_folder is not none
+        when: influxdb_restore | bool
 
       - name: Configure SELinux
         ansible.builtin.include_tasks:
@@ -65,40 +83,44 @@
           detach: true
           image: "{{ app_versions['influx-grafana']['image'] }}"
           ports:
-            - "{{ application_services['influxdb'].ports.web }}:8086"  
+            - "{{ application_services['influxdb'].ports.web }}:8086"
           volumes:
             - "{{ host_directory }}/data:/var/lib/influxdb:Z"
             - "{{ host_directory }}/influxdb.conf:/etc/influxdb/influxdb.conf:ro"
           restart_policy: unless-stopped
 
-      - name: Wait for 5 seconds to secure container is running
-        pause:
-          seconds: 5
+      - block:
+        - name: Wait for 5 seconds to secure container is running
+          pause:
+            seconds: 5
 
-      - name: Copy the backup into the container
-        ansible.builtin.command: >
-          docker cp {{ host_directory }}/backup {{ container_name }}:/backup
+        - name: Copy the backup into the container
+          ansible.builtin.command: >
+            docker cp {{ host_directory }}/backup {{ container_name }}:/backup
 
-      - name: Restore the data backup
-        ansible.builtin.command: >
-          docker exec {{ container_name }} influxd restore -portable -db openhab /backup
+        - name: Restore the data backup
+          ansible.builtin.command: >
+            docker exec {{ container_name }} influxd restore -portable -db openhab /backup
 
-      - name: Script the influxdb users creation
-        ansible.builtin.copy:
-          content: |
+        # piped over stdin so the passwords never land in a file on the host
+        - name: Create the users
+          ansible.builtin.shell: #need to use the shell for operations like "<", ">", "|", and "&" to work
+            cmd: docker exec -i {{ container_name }} /bin/sh
+            stdin: |
               influx -execute "CREATE USER admin WITH PASSWORD '{{ influxdb_admin_password }}' WITH ALL PRIVILEGES"
               influx -execute "CREATE USER openhab WITH PASSWORD '{{ influxdb_openhab_password }}'" -username admin -password {{ influxdb_admin_password }}
               influx -execute "GRANT ALL ON openhab TO openhab" -username admin -password {{ influxdb_admin_password }}
+          no_log: true
 
-          dest: "{{ host_directory }}/backup/create_users"
-          mode: '0755'
+        - name: Remove the backup folder from the container FS
+          ansible.builtin.command: >
+            docker exec {{ container_name }} rm -r /backup
+        when: influxdb_restore | bool
 
-      - name: Create the users
-        ansible.builtin.shell: #need to use the shell for operations like "<", ">", "|", and "&" to work
-          docker exec -i {{ container_name }} /bin/sh < {{ host_directory }}/backup/create_users
+      # older runs wrote the user-creation script (plaintext passwords) here
+      - name: Remove the legacy user-creation script from the host
+        ansible.builtin.file:
+          path: "{{ host_directory }}/backup/create_users"
+          state: absent
 
-      - name: Remove the backup folder from the container FS 
-        ansible.builtin.command: >
-          docker exec -it {{ container_name }} rm -r /backup
-          
       when: inventory_hostname in application_services['influxdb'].hosts

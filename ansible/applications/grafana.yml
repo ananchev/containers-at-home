@@ -20,6 +20,25 @@
           - "{{ host_directory }}"
           - "{{ host_directory }}/data"
 
+      # GUARD: restore only into an empty target (no grafana.db yet), so a routine
+      # re-run -- e.g. after a version bump -- never extracts the nightly backup over
+      # live dashboards (an older backup over a migrated 12/13 database breaks it).
+      - name: Check whether a live Grafana database already exists (restore guard)
+        ansible.builtin.stat:
+          path: "{{ host_directory }}/data/grafana.db"
+        register: grafana_db_file
+
+      - name: Refuse to deploy an empty Grafana when no backup is staged
+        ansible.builtin.fail:
+          msg: >-
+            {{ host_directory }}/data has no grafana.db and no backup.tar.gz is staged
+            in {{ local_backup_folder }}. Stage the backup and re-run, or pass
+            -e allow_empty_deploy=true for a deliberate fresh install.
+        when:
+          - not grafana_db_file.stat.exists
+          - (local_backup_folder + '/backup.tar.gz') is not file
+          - not (allow_empty_deploy | default(false) | bool)
+
       - block:
         - name: Copy the archive to the remote machine
           ansible.builtin.copy:
@@ -37,7 +56,9 @@
             group: "{{ ansible_user }}"
             recurse: true
           become: true
-        when: local_backup_folder is defined and local_backup_folder is not none
+        when:
+          - (local_backup_folder + '/backup.tar.gz') is file
+          - not grafana_db_file.stat.exists
 
       - name: Create the common network to use with grafana container
         community.docker.docker_network:
