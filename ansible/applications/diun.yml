@@ -78,6 +78,9 @@
           volumes:
             - "{{ host_directory }}/data:/data:Z"
           restart_policy: unless-stopped
+          # watchlist.yml is deleted and rebuilt on every run; the single-file bind mount
+          # keeps the old inode, so a running container would never see the new list
+          restart: true
           env:
             TZ: "Europe/Amsterdam"
             LOG_LEVEL: "info"
