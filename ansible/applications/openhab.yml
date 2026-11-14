@@ -1,5 +1,5 @@
 - hosts: homelab
-  become: true 
+  become: true
   gather_facts: False
   vars:
     application: openhab
@@ -17,6 +17,26 @@
           state: directory
           mode: '0755'
 
+      # GUARD: restore only into an empty target (no userdata/etc/version.properties
+      # yet), so a routine re-run -- e.g. after a version bump -- never extracts the
+      # nightly backup over live userdata/conf (a 4.x backup over 5.x data would
+      # downgrade the jsondb and version marker).
+      - name: Check whether a live openHAB userdata already exists (restore guard)
+        ansible.builtin.stat:
+          path: "{{ host_directory }}/userdata/etc/version.properties"
+        register: openhab_version_file
+
+      - name: Refuse to deploy an empty openHAB when no backup is staged
+        ansible.builtin.fail:
+          msg: >-
+            {{ host_directory }} has no userdata/etc/version.properties and no
+            backup.tar.gz is staged in {{ local_backup_folder }}. Stage the backup
+            and re-run, or pass -e allow_empty_deploy=true for a deliberate fresh install.
+        when:
+          - not openhab_version_file.stat.exists
+          - (local_backup_folder + '/backup.tar.gz') is not file
+          - not (allow_empty_deploy | default(false) | bool)
+
       - block:
         - name: Copy the archive to the remote machine
           ansible.builtin.copy:
@@ -26,8 +46,12 @@
           ansible.builtin.command: >
             tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}
           become: true
-        when: local_backup_folder is defined and local_backup_folder is not none
+        when:
+          - (local_backup_folder + '/backup.tar.gz') is file
+          - not openhab_version_file.stat.exists
 
+      # The Karaf console (8101) is not published: it is reachable from the host with
+      # `docker exec -it openhab /openhab/runtime/bin/client -u openhab -p <pass>`.
       - name: Run the container
         community.docker.docker_container:
           name: "{{ container_name }}"
@@ -35,25 +59,21 @@
           detach: true
           ports:
             - "{{ application_services['openhab'].ports.web }}:1234"
-            - "{{ application_services['openhab'].ports.console }}:8101"
             - "{{ application_services['openhab'].ports.https }}:8443"
           volumes:
             - "{{ host_directory }}/addons:/openhab/addons:Z"
             - "{{ host_directory }}/conf:/openhab/conf:Z"
             - "{{ host_directory }}/userdata:/openhab/userdata:Z"
-          mounts:
-            - source: /etc/localtime
-              target: /etc/localtime
-              type: bind
-              read_only: yes
+          # no /etc/localtime bind: the 5.x image warns against it and uses TZ instead
           keep_volumes: yes
+          # a clean shutdown takes ~30s; the 10s default ends in SIGKILL, which can
+          # drop deferred jsondb writes (seen 2026-11-14: removed rules came back)
+          stop_timeout: 120
           restart_policy: unless-stopped
           env:
             USER_ID: "1001"
             GROUP_ID: "1001"
             OPENHAB_HTTP_PORT: "1234"
             OPENHAB_HTTPS_PORT: "8443"
-            TZ: "Europe/Amsterdam" 
-            CRYPTO_POLICY: "unlimited"
-            EXTRA_JAVA_OPTS: "-Duser.timezone=Europe/Amsterdam"
+            TZ: "Europe/Amsterdam"
       when: inventory_hostname in application_services['openhab'].hosts

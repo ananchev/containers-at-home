@@ -48,7 +48,7 @@ application_services:
   mosquitto:           { hosts: [pi5], ports: { mqtt: 1883 } }
   nextcloud:           { hosts: [vhost], ports: { web: 8080 } }
   nginx-proxy-manager: { hosts: [pi5], ports: { web: 81, http: 80, https: 443 } }
-  openhab:             { hosts: [pi5], ports: { web: 1234, console: 8101, https: 8443 } }
+  openhab:             { hosts: [pi5], ports: { web: 1234, https: 8443 } }
   passbolt:            { hosts: [pi5], ports: { mariadb: 3306, http: 8082, https: 4433 } }
   passbolt-recovery:   { hosts: [bnod], ports: { http: 8082, https: 4433 } }
   rustdesk:            { hosts: [unas], ports: { relay: 21117, nat: 21115, hbbs: 21116 } }
