@@ -8,6 +8,7 @@
     mount_access_mode: '0666'
     mount_access_owner: '65532' # owned by container's non-root user (uid 65532)
     mount_access_group: '65532' # owned by container's non-root group (uid 65532)
+    selinux_allow_logrotate: true # host logrotate may rotate app.log (see logrotate task)
     selinux_files_to_label:
     - "{{ host_directory }}/token.cache"
     - "{{ host_directory }}/app.log"
@@ -26,15 +27,16 @@
               repo: 'https://github.com/ananchev/homeconnect-proxy.git' 
               dest: "{{ host_directory }}/source"
 
-        - name: Initiate empty log file
+        - name: Initiate empty log file (only if missing)
           ansible.builtin.copy:
             content: ""
+            force: false # create only - never truncate an existing log
             dest: "{{ host_directory }}/app.log"
             mode: "{{ mount_access_mode }}"
             owner: "{{ mount_access_owner }}"
             group: "{{ mount_access_owner }}"
 
-        - name: Write dummy token file - will be updated upon first auth
+        - name: Write dummy token file (only if missing) - updated upon first auth
           ansible.builtin.copy:
             content: |
               {
@@ -46,6 +48,7 @@
                 "scope":"IdentifyAppliance Control Settings Monitor",
                 "token_type":"Bearer"
               }
+            force: false # create only - never overwrite a live token with the dummy
             dest: "{{ host_directory }}/token.cache"
             mode: "{{ mount_access_mode }}"
             owner: "{{ mount_access_owner }}"
@@ -54,6 +57,22 @@
         - name: Configure SELinux
           ansible.builtin.include_tasks:
             file: ../_templates/configure_selinux.yml
+
+        # The container keeps app.log open (bind mount), hence copytruncate.
+        # Runs via the host's daily logrotate.timer; size is checked once a day.
+        - name: Rotate app.log with logrotate
+          ansible.builtin.copy:
+            dest: /etc/logrotate.d/{{ application }}
+            mode: '0644'
+            content: |
+              {{ host_directory }}/app.log {
+                  size 50M
+                  rotate 4
+                  compress
+                  missingok
+                  notifempty
+                  copytruncate
+              }
 
         - name: Build the home-connect image 
           community.docker.docker_image:
@@ -78,7 +97,8 @@
               CLIENT_ID: "{{ homeconnect_app_client_id }}"
               CLIENT_SECRET: "{{ homeconnect_app_client_secret }}"
               CLIENT_SCOPES: IdentifyAppliance%20Control%20Settings%20Monitor
-              MQTT_HOST: "192.168.2.8"
+              MQTT_HOST: "{{ lan_addresses[application_services['mosquitto'].hosts[0]] }}"
+              MQTT_PORT: "{{ application_services['mosquitto'].ports.mqtt }}"
               TZ: Europe/Amsterdam
             mounts:
               - source: "{{ host_directory }}/app.log"

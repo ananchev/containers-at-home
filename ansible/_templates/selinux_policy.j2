@@ -7,6 +7,10 @@ require {
     type container_t;
     type container_runtime_t;
     type fs_t;
+{% if selinux_allow_logrotate | default(false) %}
+    type logrotate_t;
+    type default_t;
+{% endif %}
     class file { create append open read write rename relabelto relabelfrom setattr getattr unlink mounton lock ioctl map watch };
     class filesystem associate;
     class dir { read write create open add_name remove_name reparent search relabelto setattr getattr unlink mounton };
@@ -28,6 +32,13 @@ allow container_t {{ container_name }}_t:file {create append open read write ren
 allow container_runtime_t {{ container_name }}_t:file {getattr mounton relabelfrom relabelto};
 {% endif %}
 
+
+{% if selinux_allow_logrotate | default(false) %}
+# Opt-in (selinux_allow_logrotate: true): host logrotate rotating labelled files (copytruncate)
+allow logrotate_t {{ container_name }}_t:file {create open read write append getattr setattr unlink rename lock ioctl};
+# ...and to create/remove the rotated copies in the app directory (default_t, as it sits under the data root)
+allow logrotate_t default_t:dir {search getattr open read write add_name remove_name};
+{% endif %}
 
 # This is executed if SELinux permissions are needed for directory objects
 {% if selinux_dirs_to_label is defined and selinux_dirs_to_label | length > 0 %}

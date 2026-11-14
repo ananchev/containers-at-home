@@ -14,7 +14,19 @@
   ansible.builtin.template:
     src: selinux_policy.j2
     dest: /tmp/{{ container_name }}.te
+  register: selinux_te_file
   when: selinux_tooling_check.rc == 0
+
+# The compile/package steps below use `creates:`, so stale artifacts from an
+# earlier policy version must go when the .te changed, or the update is skipped.
+- name: Drop stale compiled policy when the source changed
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/{{ container_name }}.mod
+    - /tmp/{{ container_name }}.pp
+  when: selinux_tooling_check.rc == 0 and selinux_te_file is changed
 
 - name: Compile custom SELinux policy
   command: checkmodule -M -m -o /tmp/{{ container_name }}.mod /tmp/{{ container_name }}.te
