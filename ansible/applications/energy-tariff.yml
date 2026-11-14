@@ -1,0 +1,115 @@
+# energy-tariff: electricity price + whole-house hourly consumption from the supplier portal
+# (Greenchoice) -> MQTT (price, retained) and InfluxDB. Design: notes/energy-monitoring.md.
+#
+# The source is in this repo (_templates/energy-tariff) and is built on the host. The image tag
+# carries the app version and the Python base tag, so a bump of either rebuilds (a fixed tag
+# would make docker_image skip the build). A change to the source rebuilds too (force_source).
+#
+# State: data/state.json (last price, backfill progress) only. Losing it just re-runs the
+# idempotent backfill, so there is no backup definition.
+# Secrets: secrets/energy-tariff.json (0600, container uid), never passed as env vars, so they
+# don't show up in `docker inspect`.
+- hosts: homelab
+  become: true
+  gather_facts: False
+  vars:
+    application: energy-tariff
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    container_name: "{{ application }}"
+    docker_network: influx-grafana        # reach influxdb by name
+    templates_dir: "{{ playbook_dir }}/../_templates"
+    app_uid: "10001"                      # the image's non-root user
+    energy_tariff_version: "1.0.1"        # bump on code changes
+    python_tag: "{{ app_versions['energy-tariff'].image.split(':')[1] }}"
+    image_name: "energy-tariff:{{ energy_tariff_version }}-py{{ python_tag }}"
+
+  tasks:
+    - name: Run only on the designated host
+      block:
+      - name: Create directories
+        ansible.builtin.file:
+          path: "{{ item.path }}"
+          state: directory
+          mode: "{{ item.mode }}"
+          owner: "{{ item.owner | default(omit) }}"
+          group: "{{ item.owner | default(omit) }}"
+        loop:
+          - { path: "{{ host_directory }}", mode: '0755' }
+          - { path: "{{ host_directory }}/source", mode: '0755' }
+          - { path: "{{ host_directory }}/source/app", mode: '0755' }
+          - { path: "{{ host_directory }}/data", mode: '0755', owner: "{{ app_uid }}" }
+          - { path: "{{ host_directory }}/secrets", mode: '0700', owner: "{{ app_uid }}" }
+
+      - name: Copy the application source
+        ansible.builtin.copy:
+          src: "{{ templates_dir }}/energy-tariff/{{ item }}"
+          dest: "{{ host_directory }}/source/{{ item }}"
+          mode: '0644'
+        loop:
+          - Dockerfile
+          - requirements.txt
+          - LICENSE.homeassistant-greenchoice
+          - app/main.py
+          - app/greenchoice_auth.py
+        register: source_copy
+
+      - name: Write the secrets file (supplier login, InfluxDB, Telegram)
+        ansible.builtin.template:
+          src: "{{ templates_dir }}/energy-tariff/secrets.json.j2"
+          dest: "{{ host_directory }}/secrets/energy-tariff.json"
+          mode: '0600'
+          owner: "{{ app_uid }}"
+          group: "{{ app_uid }}"
+        register: secrets_file
+        no_log: true
+
+      - name: Build the energy-tariff image
+        community.docker.docker_image:
+          source: build
+          build:
+            path: "{{ host_directory }}/source"
+            args:
+              PYTHON_IMAGE: "{{ app_versions['energy-tariff'].image }}"
+            rm: true
+          name: "{{ image_name }}"
+          force_source: "{{ source_copy.changed }}"
+
+      - name: Run the container
+        community.docker.docker_container:
+          name: "{{ container_name }}"
+          image: "{{ image_name }}"
+          detach: true
+          network_mode: "{{ docker_network }}"
+          env:
+            TZ: Europe/Amsterdam
+            INFLUX_URL: "http://influxdb:8086"
+            INFLUX_DB: openhab
+            MQTT_HOST: "{{ lan_addresses[application_services['mosquitto'].hosts[0]] }}"
+            MQTT_PORT: "{{ application_services['mosquitto'].ports.mqtt | string }}"
+            INTERVAL_HOURS: "6"
+            HOUSE_DAYS: "3"
+            # one-time import of the house history (the meters' history starts 2023-12)
+            BACKFILL_FROM: "2023-12-01"
+            STALE_HOURS: "48"
+          volumes:
+            - "{{ host_directory }}/data:/data:Z"
+            - "{{ host_directory }}/secrets:/run/secrets:ro,Z"
+          restart: "{{ secrets_file.changed }}"
+          restart_policy: unless-stopped
+
+      # remove superseded energy-tariff images by name (never prune -a)
+      - name: List energy-tariff images
+        ansible.builtin.command: docker images energy-tariff --format '{{ '{{' }}.Tag{{ '}}' }}'
+        register: tariff_images
+        changed_when: false
+
+      # tags only: podman reports the repository as localhost/energy-tariff
+      - name: Remove superseded energy-tariff images
+        ansible.builtin.command: docker image rm energy-tariff:{{ item }}
+        loop: "{{ tariff_images.stdout_lines | reject('equalto', image_name.split(':')[1]) | reject('equalto', '<none>') | list }}"
+        failed_when: false
+
+      - name: Remove dangling build layers
+        ansible.builtin.command: docker image prune -f
+        changed_when: false
+      when: inventory_hostname in application_services['energy-tariff'].hosts

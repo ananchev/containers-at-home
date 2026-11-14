@@ -78,6 +78,6 @@
           volumes:
             - "{{ host_directory }}/data:/var/lib/grafana:Z"
           restart_policy: unless-stopped
-          env:
-            GF_INSTALL_PLUGINS: "marcusolsson-dynamictext-panel"
+          # no GF_INSTALL_PLUGINS: the dynamictext panel it installed was unused, and
+          # plugin installs on start are a common failure point on major upgrades
       when: inventory_hostname in application_services['grafana'].hosts

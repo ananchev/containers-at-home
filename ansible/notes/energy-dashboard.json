@@ -1,0 +1,1638 @@
+{
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "panels": [],
+      "title": "Now",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "TSXICM2Gk"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "TSXICM2Gk"
+          },
+          "query": "SELECT sum(\"last\") FROM (SELECT last(\"value\") FROM \"energy_power_w\" WHERE time > now() - 5m GROUP BY \"circuit\")",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Power now (all meters)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "TSXICM2Gk"
+      },
+      "description": "All-in price per kWh (supply + energy tax + VAT) from the supplier, refreshed every 6 h by the energy-tariff container.",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 5,
+          "unit": "currencyEUR"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "TSXICM2Gk"
+          },
+          "query": "SELECT last(\"value\") FROM \"energy_tariff_eur_kwh\" WHERE $timeFilter",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "timeFrom": "30d",
+      "title": "Electricity price",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "TSXICM2Gk"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "unit": "kwatth"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "TSXICM2Gk"
+          },
+          "query": "SELECT sum(\"s\") FROM (SELECT spread(\"value\") AS \"s\" FROM \"energy_total_kwh\" WHERE $timeFilter GROUP BY \"item\")",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "timeFrom": "now/d",
+      "title": "Today",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "TSXICM2Gk"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "unit": "currencyEUR"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "TSXICM2Gk"
+          },
+          "query": "SELECT sum(\"s\") FROM (SELECT spread(\"value\") AS \"s\" FROM \"energy_cost_total_eur\" WHERE $timeFilter GROUP BY \"item\")",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "timeFrom": "now/d",
+      "title": "Today, cost",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "TSXICM2Gk"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "unit": "kwatth"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "TSXICM2Gk"
+          },
+          "query": "SELECT sum(\"s\") FROM (SELECT spread(\"value\") AS \"s\" FROM \"energy_total_kwh\" WHERE $timeFilter GROUP BY \"item\")",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "timeFrom": "now/M",
+      "title": "This month",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "TSXICM2Gk"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "unit": "currencyEUR"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "id": 7,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "TSXICM2Gk"
+          },
+          "query": "SELECT sum(\"s\") FROM (SELECT spread(\"value\") AS \"s\" FROM \"energy_cost_total_eur\" WHERE $timeFilter GROUP BY \"item\")",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "timeFrom": "now/M",
+      "title": "This month, cost",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "TSXICM2Gk"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#3274D9",
+            "mode": "fixed"
+          },
+          "min": 0,
+          "unit": "watt"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "oven_master_bed"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Oven + master bed & bath"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#E0752D",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ground_floor"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Ground floor + shed, WC"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#3274D9",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "upstairs"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Corridor, small bedroom, attic"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8F3BB8",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "laundry"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Washer + dryer"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#56A64B",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "kitchen_hob"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Hob"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#F2495C",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "kitchen_2"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Kitchen 2nd group"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#14C4B8",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 0,
+        "y": 5
+      },
+      "id": 8,
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "valueMode": "text"
+      },
+      "targets": [
+        {
+          "alias": "$tag_circuit",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "TSXICM2Gk"
+          },
+          "query": "SELECT last(\"value\") FROM \"energy_power_w\" WHERE time > now() - 5m GROUP BY \"circuit\"",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Power per circuit now",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "TSXICM2Gk"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 55,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": 300000,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          },
+          "unit": "watt"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "oven_master_bed"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Oven + master bed & bath"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#E0752D",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ground_floor"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Ground floor + shed, WC"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#3274D9",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "upstairs"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Corridor, small bedroom, attic"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8F3BB8",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "laundry"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Washer + dryer"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#56A64B",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "kitchen_hob"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Hob"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#F2495C",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "kitchen_2"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Kitchen 2nd group"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#14C4B8",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 16,
+        "x": 8,
+        "y": 5
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "alias": "$tag_circuit",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "TSXICM2Gk"
+          },
+          "query": "SELECT mean(\"value\") FROM \"energy_power_w\" WHERE $timeFilter GROUP BY time($__interval), \"circuit\" fill(null) tz('Europe/Amsterdam')",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "timeFrom": "24h",
+      "title": "Power, last 24 h (stacked)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 10,
+      "panels": [],
+      "title": "Consumption (dashboard time range, per $bucket)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "TSXICM2Gk"
+      },
+      "description": "Difference of each meter's lifetime counter per bucket, in local time. The gap 2024-12-07 to 2026-11-14 (old app broken) is not counted.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 85,
+            "lineWidth": 0,
+            "showPoints": "never",
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          },
+          "unit": "kwatth"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "oven_master_bed"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Oven + master bed & bath"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#E0752D",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ground_floor"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Ground floor + shed, WC"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#3274D9",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "upstairs"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Corridor, small bedroom, attic"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8F3BB8",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "laundry"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Washer + dryer"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#56A64B",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "kitchen_hob"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Hob"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#F2495C",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "kitchen_2"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Kitchen 2nd group"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#14C4B8",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [
+            "sum"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "alias": "$tag_circuit",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "TSXICM2Gk"
+          },
+          "query": "SELECT sum(\"d\") FROM (SELECT non_negative_difference(last(\"value\")) AS \"d\" FROM \"energy_total_kwh\" WHERE $timeFilter GROUP BY time($bucket), \"item\", \"circuit\" tz('Europe/Amsterdam')) WHERE $timeFilter GROUP BY time($bucket), \"circuit\" fill(none) tz('Europe/Amsterdam')",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Energy per circuit",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "TSXICM2Gk"
+      },
+      "description": "Each kWh priced at the tariff in effect when it was used. History before 2026-11-14 is priced at one flat rate. Fixed charges are not included.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 85,
+            "lineWidth": 0,
+            "showPoints": "never",
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          },
+          "unit": "currencyEUR"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "oven_master_bed"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Oven + master bed & bath"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#E0752D",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ground_floor"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Ground floor + shed, WC"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#3274D9",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "upstairs"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Corridor, small bedroom, attic"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8F3BB8",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "laundry"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Washer + dryer"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#56A64B",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "kitchen_hob"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Hob"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#F2495C",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "kitchen_2"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Kitchen 2nd group"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#14C4B8",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [
+            "sum"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "alias": "$tag_circuit",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "TSXICM2Gk"
+          },
+          "query": "SELECT sum(\"d\") FROM (SELECT non_negative_difference(last(\"value\")) AS \"d\" FROM \"energy_cost_total_eur\" WHERE $timeFilter GROUP BY time($bucket), \"item\", \"circuit\" tz('Europe/Amsterdam')) WHERE $timeFilter GROUP BY time($bucket), \"circuit\" fill(none) tz('Europe/Amsterdam')",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Cost per circuit",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 13,
+      "panels": [],
+      "title": "Insights",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "TSXICM2Gk"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatth"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "oven_master_bed"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Oven + master bed & bath"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#E0752D",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ground_floor"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Ground floor + shed, WC"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#3274D9",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "upstairs"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Corridor, small bedroom, attic"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8F3BB8",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "laundry"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Washer + dryer"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#56A64B",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "kitchen_hob"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Hob"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#F2495C",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "kitchen_2"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Kitchen 2nd group"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#14C4B8",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 0,
+        "y": 33
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "alias": "$tag_circuit",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "TSXICM2Gk"
+          },
+          "query": "SELECT sum(\"s\") FROM (SELECT spread(\"value\") AS \"s\" FROM \"energy_total_kwh\" WHERE $timeFilter GROUP BY \"item\", \"circuit\") GROUP BY \"circuit\"",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Share per circuit (time range)",
+      "type": "piechart"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "TSXICM2Gk"
+      },
+      "description": "Always-on load. Each watt of standby costs about 8.76 kWh a year, roughly \u20ac2.75 at \u20ac0.315/kWh.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#56A64B",
+            "mode": "fixed"
+          },
+          "min": 0,
+          "unit": "watt"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "oven_master_bed"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Oven + master bed & bath"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#E0752D",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ground_floor"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Ground floor + shed, WC"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#3274D9",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "upstairs"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Corridor, small bedroom, attic"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8F3BB8",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "laundry"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Washer + dryer"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#56A64B",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "kitchen_hob"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Hob"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#F2495C",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "kitchen_2"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Kitchen 2nd group"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#14C4B8",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 8,
+        "y": 33
+      },
+      "id": 15,
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "valueMode": "text"
+      },
+      "targets": [
+        {
+          "alias": "$tag_circuit",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "TSXICM2Gk"
+          },
+          "query": "SELECT min(\"mean\") FROM (SELECT mean(\"value\") FROM \"energy_power_w\" WHERE time > now() - 7d GROUP BY time(1h), \"circuit\") GROUP BY \"circuit\"",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Standby load per circuit (lowest hourly average, last 7 days)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "TSXICM2Gk"
+      },
+      "description": "The whole calendar month a year ago, to compare with 'This month'. Empty when there is no data for that month.",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "unit": "kwatth"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 33
+      },
+      "id": 16,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "TSXICM2Gk"
+          },
+          "query": "SELECT sum(\"s\") FROM (SELECT spread(\"value\") AS \"s\" FROM \"energy_total_kwh\" WHERE $timeFilter GROUP BY \"item\")",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "timeFrom": "now/M",
+      "timeShift": "1y",
+      "title": "Same month last year",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "TSXICM2Gk"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "kwatth"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyEUR"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 37
+      },
+      "id": 17,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "TSXICM2Gk"
+          },
+          "query": "SELECT sum(\"s\") FROM (SELECT spread(\"value\") AS \"s\" FROM \"energy_total_kwh\" WHERE $timeFilter GROUP BY \"item\")",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "TSXICM2Gk"
+          },
+          "query": "SELECT sum(\"s\") FROM (SELECT spread(\"value\") AS \"s\" FROM \"energy_cost_total_eur\" WHERE $timeFilter GROUP BY \"item\")",
+          "rawQuery": true,
+          "refId": "B",
+          "resultFormat": "time_series"
+        }
+      ],
+      "timeFrom": "12M",
+      "title": "Last 12 months",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
+      "id": 18,
+      "panels": [],
+      "title": "House (supplier meter readings)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "TSXICM2Gk"
+      },
+      "description": "The supplier only has periodic readings for this connection: month-end values are its estimates; odd-dated rows are real readings. Too coarse to compare with the meters.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatth"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 43
+      },
+      "id": 19,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Time"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "TSXICM2Gk"
+          },
+          "query": "SELECT \"total\" AS \"Register total\" FROM \"house_meter_kwh\" WHERE $timeFilter",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "table"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "TSXICM2Gk"
+          },
+          "query": "SELECT difference(\"total\") AS \"Since previous reading\" FROM \"house_meter_kwh\" WHERE $timeFilter",
+          "rawQuery": true,
+          "refId": "B",
+          "resultFormat": "table"
+        }
+      ],
+      "timeFrom": "5y",
+      "title": "Supplier meter readings",
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "TSXICM2Gk"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 43
+      },
+      "id": 20,
+      "options": {
+        "content": "**Data:** six kWh meters in the fuse box, read by openHAB every 10 s. Totals and cost are lifetime counters; consumption is the counter difference per bucket.\n\n**Price:** the supplier's all-in price, applied when the energy is used.\n\n**Not measured:** the dakkapel group has no meter, and the supplier has no hourly house data for this connection, so there is no *unmetered* figure yet.\n\nDesign: `ansible/notes/energy-monitoring.md` in containers-at-home.",
+        "mode": "markdown"
+      },
+      "targets": [],
+      "title": "About this dashboard",
+      "type": "text"
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 41,
+  "tags": [
+    "energy"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "text": "1d",
+          "value": "1d"
+        },
+        "label": "Bucket",
+        "name": "bucket",
+        "options": [
+          {
+            "selected": false,
+            "text": "1h",
+            "value": "1h"
+          },
+          {
+            "selected": true,
+            "text": "1d",
+            "value": "1d"
+          },
+          {
+            "selected": false,
+            "text": "7d",
+            "value": "7d"
+          }
+        ],
+        "query": "1h,1d,7d",
+        "type": "custom"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Energy",
+  "uid": "energy"
+}

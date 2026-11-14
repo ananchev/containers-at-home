@@ -43,6 +43,10 @@ Gotchas:
 
 ## Related devices
 
+* Energy meters, price and cost: see `energy-monitoring.md` (things, items, `energy.rules`,
+  persistence, the `energy-tariff` container). The garden soil sensor's Modbus thing is
+  disabled while the sensor is broken, because its timeouts block the shared RS485 bus.
+
 * Modbus RS485 gateway: USR-DR302 at 192.168.5.100. It is a TCP server on 502 with Modbus
   TCP->RTU and 9600 8N1. Its web UI "TX count" stays 0 even when it works. It forwards every
   serial reply to all connected TCP clients.

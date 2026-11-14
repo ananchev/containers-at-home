@@ -66,6 +66,14 @@
           become: true
         when: influxdb_restore | bool
 
+      # since 1.11 the official image runs as influxdb (uid/gid 1500), no longer as root
+      - name: Make the data directory owned by the image's influxdb user
+        ansible.builtin.file:
+          path: "{{ host_directory }}/data"
+          owner: "1500"
+          group: "1500"
+          recurse: true
+
       - name: Configure SELinux
         ansible.builtin.include_tasks:
           file: ../_templates/configure_selinux.yml
@@ -116,6 +124,15 @@
           ansible.builtin.command: >
             docker exec {{ container_name }} rm -r /backup
         when: influxdb_restore | bool
+
+      # The nightly backup (backups/backup_definitions.yml) runs `influxd backup ... /backup`
+      # via docker exec as the image user (uid 1500 since 1.11), which can't create a
+      # directory in /. Pre-create it, owned by that user; the backup's `rm -rf /backup` then
+      # only empties it (rmdir fails harmlessly: docker exec errors don't stop the backup).
+      - name: Prepare /backup inside the container for the nightly backup
+        ansible.builtin.command: >
+          docker exec -u 0 {{ container_name }} sh -c 'mkdir -p /backup && chown 1500:1500 /backup'
+        changed_when: false
 
       # older runs wrote the user-creation script (plaintext passwords) here
       - name: Remove the legacy user-creation script from the host
