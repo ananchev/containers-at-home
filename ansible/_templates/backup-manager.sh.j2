@@ -114,41 +114,49 @@ fi
 echo "--- Performing GFS cleanup on Unraid array ---"
 cd "$UNRAID_ARRAY_PATH" || exit
 
-# 1. Mark Weekly Backups (Actual Sundays)
-# Looks at folders older than daily retention to see if they are a Sunday
-find . -mindepth 1 -maxdepth 1 -type d -mtime +${UNRAID_DAILY_RETENTION} | while read -r dir; do
-    DIR_NAME=$(basename "$dir")
-    # %u returns day of week (1..7); 7 is Sunday
-    if WEEKDAY=$(date -d "$DIR_NAME" +%u 2>/dev/null); then
-        if [ "$WEEKDAY" -eq 7 ]; then
-            echo "KEEP (weekly): $DIR_NAME"
-            touch "$dir/.gfs-keep"
-        fi
+# Ages come from the folder NAME (YYYY-MM-DD), never from mtime: rsync and
+# marker files rewrite mtimes, which made old copies look new forever.
+#   daily   : every folder up to UNRAID_DAILY_RETENTION days old
+#   weekly  : newest folder of each ISO week (normally the Sunday), newest N weeks
+#   monthly : oldest folder of each month (normally the 1st), newest N months
+# Picking "newest/oldest per period" instead of "is Sunday / is the 1st" keeps
+# a copy for a period even when that exact day's backup was missed.
+TODAY_EPOCH=$(date -d "$TODAY_TIMESTAMP" +%s)
+declare -A KEEP WEEK_PICK MONTH_PICK
+ALL_DIRS=()
+for dir in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]; do
+    [ -d "$dir" ] || continue
+    DIR_EPOCH=$(date -d "$dir" +%s 2>/dev/null) || continue
+    ALL_DIRS+=("$dir")
+    if [ $(( (TODAY_EPOCH - DIR_EPOCH) / 86400 )) -le "$UNRAID_DAILY_RETENTION" ]; then
+        KEEP[$dir]="daily"
     fi
+    WEEK=$(date -d "$dir" +%G-%V)
+    MONTH=${dir:0:7}
+    # glob order is ascending: last write wins = newest in week, first = oldest in month
+    WEEK_PICK[$WEEK]="$dir"
+    [ -n "${MONTH_PICK[$MONTH]}" ] || MONTH_PICK[$MONTH]="$dir"
 done
 
-# 2. Mark Monthly Backups (1st of the month)
-find . -mindepth 1 -maxdepth 1 -type d -mtime +${UNRAID_DAILY_RETENTION} -name "*-*-01" | while read -r monthly; do
-    echo "KEEP (monthly): $(basename "$monthly")"
-    touch "$monthly/.gfs-keep"
+for dir in $(printf '%s\n' "${WEEK_PICK[@]}" | sort -r | head -n "$UNRAID_WEEKLY_RETENTION"); do
+    KEEP[$dir]="${KEEP[$dir]:+${KEEP[$dir]}+}weekly"
+done
+for dir in $(printf '%s\n' "${MONTH_PICK[@]}" | sort -r | head -n "$UNRAID_MONTHLY_RETENTION"); do
+    KEEP[$dir]="${KEEP[$dir]:+${KEEP[$dir]}+}monthly"
 done
 
-# 3. Execution of the Purge
-# Delete folders older than daily limit unless they have the .gfs-keep marker
-find . -mindepth 1 -maxdepth 1 -type d -mtime +${UNRAID_DAILY_RETENTION} | while read -r dir; do
-    if [ ! -f "$dir/.gfs-keep" ]; then
-        if [ "$DRY_RUN" = "true" ]; then
-            echo "[DRY RUN] Would DELETE old archive: $dir"
-        else
-            echo "DELETE: $(basename "$dir")"
-            rm -rf "$dir"
-        fi
+for dir in "${ALL_DIRS[@]}"; do
+    if [ -n "${KEEP[$dir]}" ]; then
+        echo "KEEP (${KEEP[$dir]}): $dir"
+    elif [ "$DRY_RUN" = "true" ]; then
+        echo "[DRY RUN] Would DELETE old archive: $dir"
     else
-        # Remove marker so it can be re-evaluated next run
-        rm -f "$dir/.gfs-keep"
-        echo "PRESERVED: $dir"
+        echo "DELETE: $dir"
+        rm -rf "$dir"
     fi
 done
+# leftovers from the old marker-based logic
+rm -f ./*/.gfs-keep
 
 # 4. Clear the backup status flags for all nodes for the next run
 # After the Unraid cleanup, "reset" the board for the next day:

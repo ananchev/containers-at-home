@@ -115,18 +115,45 @@
         set_fact:
           container_name: "{{ application }}"
 
-      # this is commented until I fix the backup routine
-      # it needs to be updated so it works from the unas archive directory
-      # - name: Copy the file archive backup to the remote machine
-      #   ansible.builtin.copy:
-      #     src: "{{ local_backup_folder }}/backup.tar.gz"
-      #     dest: "/tmp"
+      # GUARD: restore attachments only into an empty storage directory
+      # (attachments.tar.gz comes from backup_definitions.yml, host-side tar).
+      - name: Check whether the attachments directory is populated (restore guard)
+        ansible.builtin.find:
+          paths: "{{ storage_directory }}"
+          recurse: true
+          file_type: file
+        register: memos_attachments
 
-      # - name: Unzip archive into the memos data folder
-      #   ansible.builtin.command: >
-      #     tar -xzvf /tmp/backup.tar.gz -C {{ storage_directory }}
-      #   become: true
-      
+      - name: Refuse to deploy empty attachments when no backup is staged
+        ansible.builtin.fail:
+          msg: >-
+            {{ storage_directory }} is empty and attachments.tar.gz is not staged in
+            {{ local_backup_folder }}. Stage the backup and re-run, or pass
+            -e allow_empty_deploy=true for a deliberate fresh install.
+        when:
+          - memos_attachments.matched == 0
+          - (local_backup_folder + '/attachments.tar.gz') is not file
+          - not (allow_empty_deploy | default(false) | bool)
+
+      - name: Restore the attachments from backup
+        when:
+          - memos_attachments.matched == 0
+          - (local_backup_folder + '/attachments.tar.gz') is file
+        block:
+        - name: Copy the attachments archive to the remote machine
+          ansible.builtin.copy:
+            src: "{{ local_backup_folder }}/attachments.tar.gz"
+            dest: /tmp/memos-attachments.tar.gz
+
+        - name: Extract the attachments into the memos data folder (keeps uid 10001)
+          ansible.builtin.command: >
+            tar --numeric-owner -xzf /tmp/memos-attachments.tar.gz -C {{ storage_directory }}
+
+        - name: Remove the copied archive
+          ansible.builtin.file:
+            path: /tmp/memos-attachments.tar.gz
+            state: absent
+
       - name: Run the memos container
         community.docker.docker_container:
           name: "{{ container_name }}"

@@ -211,7 +211,20 @@ backup_definitions:
         target_filename: postgres_globals.sql
       - source_path: /tmp/memos.sql
         target_filename: memos.sql
-  
+
+  # memos attachments (LOCAL storage, ~100M of png/jpg/pdf). Archived on the host:
+  # the memos image only ships busybox tar. Already-compressed media, so xz buys
+  # little; gzip --rsyncable keeps the archive borg-dedupable night to night.
+  - application: memos
+    container: memos
+    backup_commands: []
+    host_commands:
+      - >-
+        set -o pipefail;
+        tar -C {{ filestore_root }}/memos --numeric-owner -cf - . | gzip -n --rsyncable
+        > "{{ backups_directory }}/{{ backup_timestamp }}/memos/attachments.tar.gz"
+    copy_actions: []
+
   - application: rustdesk
     container: rustdesk-hbbr
     backup_commands:
