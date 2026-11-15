@@ -1,0 +1,99 @@
+// persistence groups used across the configuration
+Group persist_on_change
+Group persist_every_minute
+Group persist_every_30min
+Group persist_every_hour
+
+// Energy monitoring (notes/energy-monitoring/README.md). The influxdb metadata maps meter -> circuit.
+Group gEnergyRaw    // raw lifetime counters straight from the meters (not persisted)
+Group gEnergyTotal  // validated lifetime counters (energy.rules), kWh
+Group:Number:SUM gEnergyPower "House power (metered) [%d W]" <energy> ["Measurement","Power"]  // active power, W; group state = sum
+Group gEnergyCost   // lifetime cost counters (energy.rules), EUR
+
+Number   ElectricityTariff        "Electricity price [%.5f €/kWh]"                        <price> { channel="mqtt:topic:energyTariff:electricity" }
+DateTime ElectricityTariffUpdated "Price fetched [%1$td-%1$tm-%1$tY %1$tH:%1$tM]"          <time>  { channel="mqtt:topic:energyTariff:updated" }
+
+// meter 10: Hob
+Number EnergyMeter10_Raw   "Hob counter (raw) [%.2f kWh]" <energy> (gEnergyRaw)   { channel="modbus:data:energyMeterLine10:10secPoller:reg0:number" }
+Number EnergyMeter10_Total "Hob total [%.2f kWh]"         <energy> (gEnergyTotal, Line10) ["Measurement","Energy"] { influxdb="energy_total_kwh" [meter="10", circuit="kitchen_hob"] }
+Number EnergyMeter10_Power "Hob power [%d W]"             <energy> (gEnergyPower, Line10) ["Measurement","Power"] { channel="modbus:data:energyMeterLine10:10secPoller:reg14:number", influxdb="energy_power_w" [meter="10", circuit="kitchen_hob"] }
+Number EnergyMeter10_Cost  "Hob cost total [%.2f €]"      <price>  (gEnergyCost, Line10)  ["Measurement"] { influxdb="energy_cost_total_eur" [meter="10", circuit="kitchen_hob"] }
+Number l10Voltage        "Voltage [%.1f V]"                    <voltage>        (Line10) ["Measurement","Voltage"] { channel="modbus:data:energyMeterLine10:10secPoller:reg12:number" }
+Number l10Current        "Current [%.2f A]"                    <current>        (Line10) ["Measurement","Current"] { channel="modbus:data:energyMeterLine10:10secPoller:reg13:number" }
+Number l10ReactivePower  "Reactive Power [%.3f kVar]"          <reactive_power> (Line10) ["Measurement","Power"] { channel="modbus:data:energyMeterLine10:10secPoller:reg15:number" }
+Number l10PowerFactor    "Power Factor [%.3f]"                 <power_factor>   (Line10) ["Measurement"] { channel="modbus:data:energyMeterLine10:10secPoller:reg16:number" }
+Number l10Frequency      "Frequency [%.2f Hz]"                 <sine>           (Line10) ["Measurement","Frequency"] { channel="modbus:data:energyMeterLine10:10secPoller:reg17:number" }
+Number l10MeterModbusID  "ModBus Id [%d]"                      <modbus>         (Line10) ["Status"] { channel="modbus:data:energyMeterLine10:10secPoller:reg21H:number" }
+Number l10MeterBaudrate  "Baudrate [MAP(modbusbaud.map):%s]"   <modbus>         (Line10) ["Status"] { channel="modbus:data:energyMeterLine10:10secPoller:reg21L:number" }
+
+// meter 11: Kitchen 2nd group
+Number EnergyMeter11_Raw   "Kitchen 2nd group counter (raw) [%.2f kWh]" <energy> (gEnergyRaw)   { channel="modbus:data:energyMeterLine11:10secPoller:reg0:number" }
+Number EnergyMeter11_Total "Kitchen 2nd group total [%.2f kWh]"         <energy> (gEnergyTotal, Line11) ["Measurement","Energy"] { influxdb="energy_total_kwh" [meter="11", circuit="kitchen_2"] }
+Number EnergyMeter11_Power "Kitchen 2nd group power [%d W]"             <energy> (gEnergyPower, Line11) ["Measurement","Power"] { channel="modbus:data:energyMeterLine11:10secPoller:reg14:number", influxdb="energy_power_w" [meter="11", circuit="kitchen_2"] }
+Number EnergyMeter11_Cost  "Kitchen 2nd group cost total [%.2f €]"      <price>  (gEnergyCost, Line11)  ["Measurement"] { influxdb="energy_cost_total_eur" [meter="11", circuit="kitchen_2"] }
+Number l11Voltage        "Voltage [%.1f V]"                    <voltage>        (Line11) ["Measurement","Voltage"] { channel="modbus:data:energyMeterLine11:10secPoller:reg12:number" }
+Number l11Current        "Current [%.2f A]"                    <current>        (Line11) ["Measurement","Current"] { channel="modbus:data:energyMeterLine11:10secPoller:reg13:number" }
+Number l11ReactivePower  "Reactive Power [%.3f kVar]"          <reactive_power> (Line11) ["Measurement","Power"] { channel="modbus:data:energyMeterLine11:10secPoller:reg15:number" }
+Number l11PowerFactor    "Power Factor [%.3f]"                 <power_factor>   (Line11) ["Measurement"] { channel="modbus:data:energyMeterLine11:10secPoller:reg16:number" }
+Number l11Frequency      "Frequency [%.2f Hz]"                 <sine>           (Line11) ["Measurement","Frequency"] { channel="modbus:data:energyMeterLine11:10secPoller:reg17:number" }
+Number l11MeterModbusID  "ModBus Id [%d]"                      <modbus>         (Line11) ["Status"] { channel="modbus:data:energyMeterLine11:10secPoller:reg21H:number" }
+Number l11MeterBaudrate  "Baudrate [MAP(modbusbaud.map):%s]"   <modbus>         (Line11) ["Status"] { channel="modbus:data:energyMeterLine11:10secPoller:reg21L:number" }
+
+// meter 2: Ground floor & shed, WC
+Number EnergyMeter2_Raw   "Ground floor & shed, WC counter (raw) [%.2f kWh]" <energy> (gEnergyRaw)   { channel="modbus:data:energyMeterLine2:10secPoller:reg0:number" }
+Number EnergyMeter2_Total "Ground floor & shed, WC total [%.2f kWh]"         <energy> (gEnergyTotal, Line2) ["Measurement","Energy"] { influxdb="energy_total_kwh" [meter="2", circuit="ground_floor"] }
+Number EnergyMeter2_Power "Ground floor & shed, WC power [%d W]"             <energy> (gEnergyPower, Line2) ["Measurement","Power"] { channel="modbus:data:energyMeterLine2:10secPoller:reg14:number", influxdb="energy_power_w" [meter="2", circuit="ground_floor"] }
+Number EnergyMeter2_Cost  "Ground floor & shed, WC cost total [%.2f €]"      <price>  (gEnergyCost, Line2)  ["Measurement"] { influxdb="energy_cost_total_eur" [meter="2", circuit="ground_floor"] }
+Number l2Voltage        "Voltage [%.1f V]"                    <voltage>        (Line2) ["Measurement","Voltage"] { channel="modbus:data:energyMeterLine2:10secPoller:reg12:number" }
+Number l2Current        "Current [%.2f A]"                    <current>        (Line2) ["Measurement","Current"] { channel="modbus:data:energyMeterLine2:10secPoller:reg13:number" }
+Number l2ReactivePower  "Reactive Power [%.3f kVar]"          <reactive_power> (Line2) ["Measurement","Power"] { channel="modbus:data:energyMeterLine2:10secPoller:reg15:number" }
+Number l2PowerFactor    "Power Factor [%.3f]"                 <power_factor>   (Line2) ["Measurement"] { channel="modbus:data:energyMeterLine2:10secPoller:reg16:number" }
+Number l2Frequency      "Frequency [%.2f Hz]"                 <sine>           (Line2) ["Measurement","Frequency"] { channel="modbus:data:energyMeterLine2:10secPoller:reg17:number" }
+Number l2MeterModbusID  "ModBus Id [%d]"                      <modbus>         (Line2) ["Status"] { channel="modbus:data:energyMeterLine2:10secPoller:reg21H:number" }
+Number l2MeterBaudrate  "Baudrate [MAP(modbusbaud.map):%s]"   <modbus>         (Line2) ["Status"] { channel="modbus:data:energyMeterLine2:10secPoller:reg21L:number" }
+
+// meter 3: Oven + master bedroom & bath
+Number EnergyMeter3_Raw   "Oven + master bedroom & bath counter (raw) [%.2f kWh]" <energy> (gEnergyRaw)   { channel="modbus:data:energyMeterLine3:10secPoller:reg0:number" }
+Number EnergyMeter3_Total "Oven + master bedroom & bath total [%.2f kWh]"         <energy> (gEnergyTotal, Line3) ["Measurement","Energy"] { influxdb="energy_total_kwh" [meter="3", circuit="oven_master_bed"] }
+Number EnergyMeter3_Power "Oven + master bedroom & bath power [%d W]"             <energy> (gEnergyPower, Line3) ["Measurement","Power"] { channel="modbus:data:energyMeterLine3:10secPoller:reg14:number", influxdb="energy_power_w" [meter="3", circuit="oven_master_bed"] }
+Number EnergyMeter3_Cost  "Oven + master bedroom & bath cost total [%.2f €]"      <price>  (gEnergyCost, Line3)  ["Measurement"] { influxdb="energy_cost_total_eur" [meter="3", circuit="oven_master_bed"] }
+Number l3Voltage        "Voltage [%.1f V]"                    <voltage>        (Line3) ["Measurement","Voltage"] { channel="modbus:data:energyMeterLine3:10secPoller:reg12:number" }
+Number l3Current        "Current [%.2f A]"                    <current>        (Line3) ["Measurement","Current"] { channel="modbus:data:energyMeterLine3:10secPoller:reg13:number" }
+Number l3ReactivePower  "Reactive Power [%.3f kVar]"          <reactive_power> (Line3) ["Measurement","Power"] { channel="modbus:data:energyMeterLine3:10secPoller:reg15:number" }
+Number l3PowerFactor    "Power Factor [%.3f]"                 <power_factor>   (Line3) ["Measurement"] { channel="modbus:data:energyMeterLine3:10secPoller:reg16:number" }
+Number l3Frequency      "Frequency [%.2f Hz]"                 <sine>           (Line3) ["Measurement","Frequency"] { channel="modbus:data:energyMeterLine3:10secPoller:reg17:number" }
+Number l3MeterModbusID  "ModBus Id [%d]"                      <modbus>         (Line3) ["Status"] { channel="modbus:data:energyMeterLine3:10secPoller:reg21H:number" }
+Number l3MeterBaudrate  "Baudrate [MAP(modbusbaud.map):%s]"   <modbus>         (Line3) ["Status"] { channel="modbus:data:energyMeterLine3:10secPoller:reg21L:number" }
+
+// meter 4: Washer & dryer
+Number EnergyMeter4_Raw   "Washer & dryer counter (raw) [%.2f kWh]" <energy> (gEnergyRaw)   { channel="modbus:data:energyMeterLine4:10secPoller:reg0:number" }
+Number EnergyMeter4_Total "Washer & dryer total [%.2f kWh]"         <energy> (gEnergyTotal, Line4) ["Measurement","Energy"] { influxdb="energy_total_kwh" [meter="4", circuit="laundry"] }
+Number EnergyMeter4_Power "Washer & dryer power [%d W]"             <energy> (gEnergyPower, Line4) ["Measurement","Power"] { channel="modbus:data:energyMeterLine4:10secPoller:reg14:number", influxdb="energy_power_w" [meter="4", circuit="laundry"] }
+Number EnergyMeter4_Cost  "Washer & dryer cost total [%.2f €]"      <price>  (gEnergyCost, Line4)  ["Measurement"] { influxdb="energy_cost_total_eur" [meter="4", circuit="laundry"] }
+Number l4Voltage        "Voltage [%.1f V]"                    <voltage>        (Line4) ["Measurement","Voltage"] { channel="modbus:data:energyMeterLine4:10secPoller:reg12:number" }
+Number l4Current        "Current [%.2f A]"                    <current>        (Line4) ["Measurement","Current"] { channel="modbus:data:energyMeterLine4:10secPoller:reg13:number" }
+Number l4ReactivePower  "Reactive Power [%.3f kVar]"          <reactive_power> (Line4) ["Measurement","Power"] { channel="modbus:data:energyMeterLine4:10secPoller:reg15:number" }
+Number l4PowerFactor    "Power Factor [%.3f]"                 <power_factor>   (Line4) ["Measurement"] { channel="modbus:data:energyMeterLine4:10secPoller:reg16:number" }
+Number l4Frequency      "Frequency [%.2f Hz]"                 <sine>           (Line4) ["Measurement","Frequency"] { channel="modbus:data:energyMeterLine4:10secPoller:reg17:number" }
+Number l4MeterModbusID  "ModBus Id [%d]"                      <modbus>         (Line4) ["Status"] { channel="modbus:data:energyMeterLine4:10secPoller:reg21H:number" }
+Number l4MeterBaudrate  "Baudrate [MAP(modbusbaud.map):%s]"   <modbus>         (Line4) ["Status"] { channel="modbus:data:energyMeterLine4:10secPoller:reg21L:number" }
+
+// meter 5: Corridor, small bedroom, attic
+Number EnergyMeter5_Raw   "Corridor, small bedroom, attic counter (raw) [%.2f kWh]" <energy> (gEnergyRaw)   { channel="modbus:data:energyMeterLine5:10secPoller:reg0:number" }
+Number EnergyMeter5_Total "Corridor, small bedroom, attic total [%.2f kWh]"         <energy> (gEnergyTotal, Line5) ["Measurement","Energy"] { influxdb="energy_total_kwh" [meter="5", circuit="upstairs"] }
+Number EnergyMeter5_Power "Corridor, small bedroom, attic power [%d W]"             <energy> (gEnergyPower, Line5) ["Measurement","Power"] { channel="modbus:data:energyMeterLine5:10secPoller:reg14:number", influxdb="energy_power_w" [meter="5", circuit="upstairs"] }
+Number EnergyMeter5_Cost  "Corridor, small bedroom, attic cost total [%.2f €]"      <price>  (gEnergyCost, Line5)  ["Measurement"] { influxdb="energy_cost_total_eur" [meter="5", circuit="upstairs"] }
+Number l5Voltage        "Voltage [%.1f V]"                    <voltage>        (Line5) ["Measurement","Voltage"] { channel="modbus:data:energyMeterLine5:10secPoller:reg12:number" }
+Number l5Current        "Current [%.2f A]"                    <current>        (Line5) ["Measurement","Current"] { channel="modbus:data:energyMeterLine5:10secPoller:reg13:number" }
+Number l5ReactivePower  "Reactive Power [%.3f kVar]"          <reactive_power> (Line5) ["Measurement","Power"] { channel="modbus:data:energyMeterLine5:10secPoller:reg15:number" }
+Number l5PowerFactor    "Power Factor [%.3f]"                 <power_factor>   (Line5) ["Measurement"] { channel="modbus:data:energyMeterLine5:10secPoller:reg16:number" }
+Number l5Frequency      "Frequency [%.2f Hz]"                 <sine>           (Line5) ["Measurement","Frequency"] { channel="modbus:data:energyMeterLine5:10secPoller:reg17:number" }
+Number l5MeterModbusID  "ModBus Id [%d]"                      <modbus>         (Line5) ["Status"] { channel="modbus:data:energyMeterLine5:10secPoller:reg21H:number" }
+Number l5MeterBaudrate  "Baudrate [MAP(modbusbaud.map):%s]"   <modbus>         (Line5) ["Status"] { channel="modbus:data:energyMeterLine5:10secPoller:reg21L:number" }
+
+// House summary for the UI (energy.rules "Energy: today and this month"), metered circuits only.
+// Computed from InfluxDB every minute, so they are not persisted.
+Number EnergyToday_kWh  "Used today [%.2f kWh]"      <energy>
+Number EnergyToday_Cost "Cost today [%.2f €]"        <price>
+Number EnergyMonth_kWh  "Used this month [%.1f kWh]" <energy>
+Number EnergyMonth_Cost "Cost this month [%.2f €]"   <price>

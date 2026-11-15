@@ -11,7 +11,7 @@ InfluxDB (uid `TSXICM2Gk`, `http://influxdb:8086`, on the `influx-grafana` netwo
   database, not provisioned from the repo.
 * The playbook restores **only** into an empty target (no `data/grafana.db`). With an empty
   target and no staged backup it fails, unless you pass `-e allow_empty_deploy=true`.
-* The energy dashboard has a reference copy in `notes/energy-dashboard.json`, for rebuilding or
+* The energy dashboard has a reference copy in `notes/energy-monitoring/energy-dashboard.json`, for rebuilding or
   comparing. Import it via Dashboards -> New -> Import.
 
 ## Upgrades

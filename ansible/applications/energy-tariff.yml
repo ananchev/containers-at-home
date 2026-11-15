@@ -1,5 +1,5 @@
 # energy-tariff: electricity price + whole-house hourly consumption from the supplier portal
-# (Greenchoice) -> MQTT (price, retained) and InfluxDB. Design: notes/energy-monitoring.md.
+# (Greenchoice) -> MQTT (price, retained) and InfluxDB. Design: notes/energy-monitoring/README.md.
 #
 # The source is in this repo (_templates/energy-tariff) and is built on the host. The image tag
 # carries the app version and the Python base tag, so a bump of either rebuilds (a fixed tag

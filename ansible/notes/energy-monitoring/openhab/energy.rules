@@ -1,0 +1,119 @@
+// Energy monitoring (notes/energy-monitoring/README.md)
+//
+// EnergyMeterNN_Raw is the meter's lifetime counter as read over Modbus. This rule copies it
+// into EnergyMeterNN_Total (the persisted value) only when the step is plausible, so a bad
+// read (e.g. 0) can never become a fake jump in Grafana, and adds the step's cost at the
+// current tariff to EnergyMeterNN_Cost. Total, Cost and the tariff are restored on startup
+// (mapdb), so energy used while openHAB was down is still counted on the first new reading.
+
+import java.util.Map
+
+val Map<String, Integer> rejected = newHashMap
+// a 10 s poll can't add this much; larger steps only happen after long outages
+val Double MAX_STEP_KWH = 50.0
+// this many implausible readings in a row (~5 min) = the meter was really reset or replaced
+val Integer ACCEPT_AFTER = 30
+
+rule "Energy meters: validate counter and add cost"
+when
+    Member of gEnergyRaw changed
+then
+    if (!(newState instanceof Number)) return;
+    val id = triggeringItem.name.replace("EnergyMeter", "").replace("_Raw", "")
+    val total = gEnergyTotal.members.findFirst[ name == "EnergyMeter" + id + "_Total" ]
+    val cost = gEnergyCost.members.findFirst[ name == "EnergyMeter" + id + "_Cost" ]
+    val raw = (newState as Number).doubleValue
+    val tariffOk = ElectricityTariff.state instanceof Number
+    val tariff = if (tariffOk) (ElectricityTariff.state as Number).doubleValue else 0.0
+
+    if (!(total.state instanceof Number)) {
+        // nothing stored yet: this reading becomes the baseline
+        total.postUpdate(raw)
+        if (!(cost.state instanceof Number) && tariffOk) cost.postUpdate(raw * tariff)
+        logInfo("energy", "Meter {}: baseline {} kWh", id, raw)
+        return;
+    }
+
+    val delta = raw - (total.state as Number).doubleValue
+    if (delta == 0) return;
+
+    if (delta < 0 || delta > MAX_STEP_KWH) {
+        val n = rejected.getOrDefault(id, 0) + 1
+        rejected.put(id, n)
+        if (n == 1) logWarn("energy", "Meter {}: ignoring implausible reading {} kWh (stored {} kWh)", id, raw, total.state)
+        if (n >= ACCEPT_AFTER) {
+            logWarn("energy", "Meter {}: {} implausible readings in a row, accepting {} kWh as the new baseline (meter reset or replaced?)", id, n, raw)
+            total.postUpdate(raw)
+            rejected.remove(id)
+        }
+        return;
+    }
+
+    rejected.remove(id)
+    total.postUpdate(raw)
+    if (tariffOk) {
+        val before = if (cost.state instanceof Number) (cost.state as Number).doubleValue else (raw - delta) * tariff
+        cost.postUpdate(before + delta * tariff)
+    } else {
+        logWarn("energy", "Meter {}: no electricity tariff, {} kWh not priced", id, delta)
+    }
+end
+
+// Catch-up for meters whose first reading arrived before this file was loaded (an idle
+// circuit may not change again for hours), and for cost counters that started without a price.
+rule "Energy meters: initialise missing baselines"
+when
+    System reached start level 100 or
+    Time cron "0 */15 * * * ?"
+then
+    val tariffOk = ElectricityTariff.state instanceof Number
+    gEnergyRaw.members.forEach[ raw |
+        val id = raw.name.replace("EnergyMeter", "").replace("_Raw", "")
+        val total = gEnergyTotal.members.findFirst[ name == "EnergyMeter" + id + "_Total" ]
+        val cost = gEnergyCost.members.findFirst[ name == "EnergyMeter" + id + "_Cost" ]
+        if (raw.state instanceof Number && !(total.state instanceof Number)) {
+            total.postUpdate(raw.state)
+            logInfo("energy", "Meter {}: baseline {} kWh (catch-up)", id, raw.state)
+        }
+        if (tariffOk && total.state instanceof Number && !(cost.state instanceof Number)) {
+            cost.postUpdate((total.state as Number).doubleValue * (ElectricityTariff.state as Number).doubleValue)
+        }
+    ]
+end
+
+// House summary for the UI: kWh and cost of all metered circuits today and this month.
+// The counters only go up, so "used since T" = current value - the lowest value stored since T.
+// That also works on the first day (no data before midnight yet) and needs no extra state.
+rule "Energy: today and this month"
+when
+    Time cron "30 * * * * ?"
+then
+    val midnight = now.with(java.time.LocalTime.MIDNIGHT)
+    val monthStart = midnight.withDayOfMonth(1)
+    var double dayKwh = 0.0
+    var double monthKwh = 0.0
+    var double dayCost = 0.0
+    var double monthCost = 0.0
+    for (i : gEnergyTotal.members) {
+        if (i.state instanceof Number) {
+            val cur = (i.state as Number).doubleValue
+            val d = i.minimumSince(midnight, "influxdb")
+            val m = i.minimumSince(monthStart, "influxdb")
+            if (d !== null) dayKwh = dayKwh + cur - (d.state as Number).doubleValue
+            if (m !== null) monthKwh = monthKwh + cur - (m.state as Number).doubleValue
+        }
+    }
+    for (i : gEnergyCost.members) {
+        if (i.state instanceof Number) {
+            val cur = (i.state as Number).doubleValue
+            val d = i.minimumSince(midnight, "influxdb")
+            val m = i.minimumSince(monthStart, "influxdb")
+            if (d !== null) dayCost = dayCost + cur - (d.state as Number).doubleValue
+            if (m !== null) monthCost = monthCost + cur - (m.state as Number).doubleValue
+        }
+    }
+    EnergyToday_kWh.postUpdate(dayKwh)
+    EnergyMonth_kWh.postUpdate(monthKwh)
+    EnergyToday_Cost.postUpdate(dayCost)
+    EnergyMonth_Cost.postUpdate(monthCost)
+end

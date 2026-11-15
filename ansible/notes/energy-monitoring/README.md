@@ -1,7 +1,8 @@
 # Energy monitoring
 
 How the house's electricity use is measured, priced and shown. Built 2026-11-14; it replaces the
-old `energy-meters` container (a separate Python app that read the meters once an hour; retired).
+old `energy-meters` container (a separate Python app that read the meters once an hour; retired,
+its repo `ananchev/energymeter` archived on GitHub; the parts still useful now live in this folder).
 
 ## The short version
 
@@ -27,9 +28,10 @@ flowchart LR
 
 | Part | Notes |
 |---|---|
-| Meters | Single-phase DDS238-2 ZN/S, one per group. Each has its own Modbus id (`dds238-2/change-id.py` in the old app repo changes it). |
+| Meters | Single-phase DDS238-2 ZN/S, one per group. Each has its own Modbus id (see "Setting a meter's Modbus id"). Datasheet: `datasheets/DDS238-2-ZNS-energy-meter.pdf`. |
+| Planned meter | A DDS661 (single-phase, RS485 Modbus) for the one circuit that is not metered yet; installed once the device arrives. Manual: `datasheets/DDS661-rs485-energy-meter.pdf`. Its register map can differ from the DDS238-2, so check the manual before adding it to `energyMeters.things`. |
 | Bus | RS485, 9600 baud, 8N1. One bus carries all meters (and the garden soil sensor). |
-| Gateway | USR-DR302: a TCP server on port 502 that converts Modbus TCP to RTU. Its web UI "TX count" stays 0 even when it works. It forwards every reply to **all** connected TCP clients, so only openHAB should talk to the bus. |
+| Gateway | USR-DR302: a TCP server on port 502 that converts Modbus TCP to RTU. Its web UI "TX count" stays 0 even when it works. It forwards every reply to **all** connected TCP clients, so only openHAB should talk to the bus. Manual: `datasheets/USR-DR302-rs485-to-ethernet-gw.pdf`. |
 
 Meter registers used (holding registers, read in one block 0–21):
 
@@ -47,6 +49,24 @@ Meter registers used (holding registers, read in one block 0–21):
 A slave that doesn't answer blocks the bus for its whole timeout (3 tries of about 3.4 s) on
 every poll, which delays the meter reads. While the soil sensor (id 101) is broken, its thing is
 **disabled** in openHAB (`openhab:things enable modbus:tcp:frontGardenHTmeter` turns it back on).
+
+### Setting a meter's Modbus id
+
+A new DDS238-2 usually comes with id 1 at 9600 baud. Two scripts in `meter-tools/` read and change register 21
+(id in the high byte, baud code in the low byte: 1=9600, 2=4800, 3=2400, 4=1200). They are a
+third-party script (Toulon7559, 2017) and talk to a **USB RS485 adapter** (`/dev/ttyUSB0`; on a Mac
+something like `/dev/tty.usbserial-*`), not to the gateway. They need `pip install minimalmodbus`.
+
+1. Wire the meter **on its own** to the USB adapter (A to A, B to B). Don't do this on the live bus:
+   openHAB polls through the gateway and the two masters would collide. The broadcast read also
+   only makes sense with a single meter connected.
+2. `modbus-identify.py` reads id and baud through the broadcast address 0. Set `speed` in the
+   script if 9600 shows nothing.
+3. In `change-id.py`, set `present_address` / `present_rate` and `new_address` / `new_rate`, and run
+   it once. Re-run `modbus-identify.py` to confirm.
+4. Put the meter back on the bus, then add it in openHAB (see "Changing the wiring").
+
+Ids in use: 2, 3, 4, 5, 10, 11 (meters) and 101 (soil sensor).
 
 ## Meters and circuits
 
@@ -232,7 +252,18 @@ openHAB's `conf/html/energy.html` embeds the 24-hour power panel.
 | `applications/energy-tariff.yml` | Deploys the supplier container |
 | `_templates/energy-tariff/` | Its source, Dockerfile and secrets template |
 
-The openHAB files are part of openHAB's `conf/` and covered by its backup (see `openhab.md`).
+In this folder:
+
+| File | What |
+|---|---|
+| `openhab/` | Reference copies of `energyMeters.things`, `energyMeters.items`, `energy.rules` (taken 2026-11-14) |
+| `energy-dashboard.json` | Reference export of the Grafana dashboard |
+| `meter-tools/` | `modbus-identify.py`, `change-id.py` (see "Setting a meter's Modbus id") |
+| `datasheets/` | DDS238-2 and DDS661 meter and USR-DR302 gateway manuals |
+
+The reference copies are not deployed. The live files on pi5 are the source of truth: after changing
+them, copy them here again. The openHAB files are part of openHAB's `conf/` and covered by its
+backup (see `../openhab.md`).
 `energy-tariff` has no backup definition: its only state (`data/state.json`: last price, import
 progress) is rebuilt on its own. Its secrets file (`secrets/energy-tariff.json`, mode 0600) is
 written by the playbook from the vault. It is mounted as a file, not passed as environment

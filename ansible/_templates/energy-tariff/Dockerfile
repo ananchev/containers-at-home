@@ -1,4 +1,4 @@
-# energy-tariff: see ansible/notes/energy-monitoring.md
+# energy-tariff: see ansible/notes/energy-monitoring/README.md
 ARG PYTHON_IMAGE=python:3.13.18-slim
 FROM ${PYTHON_IMAGE}
 

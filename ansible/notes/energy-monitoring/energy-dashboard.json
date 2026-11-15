@@ -1584,7 +1584,7 @@
       },
       "id": 20,
       "options": {
-        "content": "**Data:** six kWh meters in the fuse box, read by openHAB every 10 s. Totals and cost are lifetime counters; consumption is the counter difference per bucket.\n\n**Price:** the supplier's all-in price, applied when the energy is used.\n\n**Not measured:** the dakkapel group has no meter, and the supplier has no hourly house data for this connection, so there is no *unmetered* figure yet.\n\nDesign: `ansible/notes/energy-monitoring.md` in containers-at-home.",
+        "content": "**Data:** six kWh meters in the fuse box, read by openHAB every 10 s. Totals and cost are lifetime counters; consumption is the counter difference per bucket.\n\n**Price:** the supplier's all-in price, applied when the energy is used.\n\n**Not measured:** the dakkapel group has no meter, and the supplier has no hourly house data for this connection, so there is no *unmetered* figure yet.\n\nDesign: `ansible/notes/energy-monitoring/README.md` in containers-at-home.",
         "mode": "markdown"
       },
       "targets": [],

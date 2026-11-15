@@ -1,0 +1,94 @@
+// Energy meters: DDS238-2 on the RS485 bus behind the USR-DR302 gateway (see notes/energy-monitoring.md)
+// One block read of holding registers 0..21 every 10 s per meter; openHAB is the only Modbus client.
+
+Bridge modbus:tcp:energyMeterLine10 [ host="192.168.5.100", port=502, id=10, baud=9600, stopBits="1.0", parity="none", dataBits=8, encoding="rtu"] {
+    Bridge poller 10secPoller [ start=0, length=22, refresh=10000, type="holding" ] {
+        Thing data reg0     [ readStart="0",    readValueType="uint32", readTransform="JS(divide100.js)" ] //lifetime energy, kWh
+        Thing data reg12    [ readStart="12",   readValueType="uint16", readTransform="JS(divide10.js)" ] //voltage, V
+        Thing data reg13    [ readStart="13",   readValueType="uint16", readTransform="JS(divide100.js)" ] //current, A
+        Thing data reg14    [ readStart="14",   readValueType="int16" ] //active power, W (signed)
+        Thing data reg15    [ readStart="15",   readValueType="uint16", readTransform="JS(divide1000.js)" ] //reactive power, kvar
+        Thing data reg16    [ readStart="16",   readValueType="uint16", readTransform="JS(divide1000.js)" ] //power factor
+        Thing data reg17    [ readStart="17",   readValueType="uint16", readTransform="JS(divide100.js)" ] //frequency, Hz
+        Thing data reg21L   [ readStart="21.0", readValueType="int8" ] //baud code
+        Thing data reg21H   [ readStart="21.1", readValueType="int8" ] //Modbus id
+    }
+}
+
+Bridge modbus:tcp:energyMeterLine11 [ host="192.168.5.100", port=502, id=11, baud=9600, stopBits="1.0", parity="none", dataBits=8, encoding="rtu"] {
+    Bridge poller 10secPoller [ start=0, length=22, refresh=10000, type="holding" ] {
+        Thing data reg0     [ readStart="0",    readValueType="uint32", readTransform="JS(divide100.js)" ] //lifetime energy, kWh
+        Thing data reg12    [ readStart="12",   readValueType="uint16", readTransform="JS(divide10.js)" ] //voltage, V
+        Thing data reg13    [ readStart="13",   readValueType="uint16", readTransform="JS(divide100.js)" ] //current, A
+        Thing data reg14    [ readStart="14",   readValueType="int16" ] //active power, W (signed)
+        Thing data reg15    [ readStart="15",   readValueType="uint16", readTransform="JS(divide1000.js)" ] //reactive power, kvar
+        Thing data reg16    [ readStart="16",   readValueType="uint16", readTransform="JS(divide1000.js)" ] //power factor
+        Thing data reg17    [ readStart="17",   readValueType="uint16", readTransform="JS(divide100.js)" ] //frequency, Hz
+        Thing data reg21L   [ readStart="21.0", readValueType="int8" ] //baud code
+        Thing data reg21H   [ readStart="21.1", readValueType="int8" ] //Modbus id
+    }
+}
+
+Bridge modbus:tcp:energyMeterLine2 [ host="192.168.5.100", port=502, id=2, baud=9600, stopBits="1.0", parity="none", dataBits=8, encoding="rtu"] {
+    Bridge poller 10secPoller [ start=0, length=22, refresh=10000, type="holding" ] {
+        Thing data reg0     [ readStart="0",    readValueType="uint32", readTransform="JS(divide100.js)" ] //lifetime energy, kWh
+        Thing data reg12    [ readStart="12",   readValueType="uint16", readTransform="JS(divide10.js)" ] //voltage, V
+        Thing data reg13    [ readStart="13",   readValueType="uint16", readTransform="JS(divide100.js)" ] //current, A
+        Thing data reg14    [ readStart="14",   readValueType="int16" ] //active power, W (signed)
+        Thing data reg15    [ readStart="15",   readValueType="uint16", readTransform="JS(divide1000.js)" ] //reactive power, kvar
+        Thing data reg16    [ readStart="16",   readValueType="uint16", readTransform="JS(divide1000.js)" ] //power factor
+        Thing data reg17    [ readStart="17",   readValueType="uint16", readTransform="JS(divide100.js)" ] //frequency, Hz
+        Thing data reg21L   [ readStart="21.0", readValueType="int8" ] //baud code
+        Thing data reg21H   [ readStart="21.1", readValueType="int8" ] //Modbus id
+    }
+}
+
+Bridge modbus:tcp:energyMeterLine3 [ host="192.168.5.100", port=502, id=3, baud=9600, stopBits="1.0", parity="none", dataBits=8, encoding="rtu"] {
+    Bridge poller 10secPoller [ start=0, length=22, refresh=10000, type="holding" ] {
+        Thing data reg0     [ readStart="0",    readValueType="uint32", readTransform="JS(divide100.js)" ] //lifetime energy, kWh
+        Thing data reg12    [ readStart="12",   readValueType="uint16", readTransform="JS(divide10.js)" ] //voltage, V
+        Thing data reg13    [ readStart="13",   readValueType="uint16", readTransform="JS(divide100.js)" ] //current, A
+        Thing data reg14    [ readStart="14",   readValueType="int16" ] //active power, W (signed)
+        Thing data reg15    [ readStart="15",   readValueType="uint16", readTransform="JS(divide1000.js)" ] //reactive power, kvar
+        Thing data reg16    [ readStart="16",   readValueType="uint16", readTransform="JS(divide1000.js)" ] //power factor
+        Thing data reg17    [ readStart="17",   readValueType="uint16", readTransform="JS(divide100.js)" ] //frequency, Hz
+        Thing data reg21L   [ readStart="21.0", readValueType="int8" ] //baud code
+        Thing data reg21H   [ readStart="21.1", readValueType="int8" ] //Modbus id
+    }
+}
+
+Bridge modbus:tcp:energyMeterLine4 [ host="192.168.5.100", port=502, id=4, baud=9600, stopBits="1.0", parity="none", dataBits=8, encoding="rtu"] {
+    Bridge poller 10secPoller [ start=0, length=22, refresh=10000, type="holding" ] {
+        Thing data reg0     [ readStart="0",    readValueType="uint32", readTransform="JS(divide100.js)" ] //lifetime energy, kWh
+        Thing data reg12    [ readStart="12",   readValueType="uint16", readTransform="JS(divide10.js)" ] //voltage, V
+        Thing data reg13    [ readStart="13",   readValueType="uint16", readTransform="JS(divide100.js)" ] //current, A
+        Thing data reg14    [ readStart="14",   readValueType="int16" ] //active power, W (signed)
+        Thing data reg15    [ readStart="15",   readValueType="uint16", readTransform="JS(divide1000.js)" ] //reactive power, kvar
+        Thing data reg16    [ readStart="16",   readValueType="uint16", readTransform="JS(divide1000.js)" ] //power factor
+        Thing data reg17    [ readStart="17",   readValueType="uint16", readTransform="JS(divide100.js)" ] //frequency, Hz
+        Thing data reg21L   [ readStart="21.0", readValueType="int8" ] //baud code
+        Thing data reg21H   [ readStart="21.1", readValueType="int8" ] //Modbus id
+    }
+}
+
+Bridge modbus:tcp:energyMeterLine5 [ host="192.168.5.100", port=502, id=5, baud=9600, stopBits="1.0", parity="none", dataBits=8, encoding="rtu"] {
+    Bridge poller 10secPoller [ start=0, length=22, refresh=10000, type="holding" ] {
+        Thing data reg0     [ readStart="0",    readValueType="uint32", readTransform="JS(divide100.js)" ] //lifetime energy, kWh
+        Thing data reg12    [ readStart="12",   readValueType="uint16", readTransform="JS(divide10.js)" ] //voltage, V
+        Thing data reg13    [ readStart="13",   readValueType="uint16", readTransform="JS(divide100.js)" ] //current, A
+        Thing data reg14    [ readStart="14",   readValueType="int16" ] //active power, W (signed)
+        Thing data reg15    [ readStart="15",   readValueType="uint16", readTransform="JS(divide1000.js)" ] //reactive power, kvar
+        Thing data reg16    [ readStart="16",   readValueType="uint16", readTransform="JS(divide1000.js)" ] //power factor
+        Thing data reg17    [ readStart="17",   readValueType="uint16", readTransform="JS(divide100.js)" ] //frequency, Hz
+        Thing data reg21L   [ readStart="21.0", readValueType="int8" ] //baud code
+        Thing data reg21H   [ readStart="21.1", readValueType="int8" ] //Modbus id
+    }
+}
+
+// Electricity price, published (retained) by the energy-tariff container
+Thing mqtt:topic:energyTariff "Electricity tariff" (mqtt:broker:c60e6d09) //broker defined via UI
+{
+    Channels:
+        Type number   : electricity "Price, all-in incl. VAT" [ stateTopic="energy/tariff/electricity" ]
+        Type datetime : updated     "Price fetched at"       [ stateTopic="energy/tariff/updated" ]
+}

@@ -11,7 +11,7 @@ Once, if BACKFILL_FROM is set and the supplier has hourly data at all: the hourl
 consumption from that date on.
 If the price could not be refreshed for STALE_HOURS, a Telegram alert is sent (max 1/day).
 
-Design and data layout: ansible/notes/energy-monitoring.md. Secrets are read from
+Design and data layout: ansible/notes/energy-monitoring/README.md. Secrets are read from
 SECRETS_FILE and are never logged.
 """
 
