@@ -261,7 +261,10 @@ backup_definitions:
     container: jellyfin
     backup_commands:
       - mkdir -p /tmp
-      - tar --exclude='/config/log' -czvf /tmp/backup.tar.gz /config /data
+      # plain tar + gzip --rsyncable (GNU gzip in this image): a normal gzip stream
+      # changes completely every night, which defeats borg dedup (~830M/day new chunks)
+      - tar --exclude='/config/log' -cf /tmp/backup.tar /config /data
+      - gzip -f --rsyncable /tmp/backup.tar
     copy_actions:
       - source_path: /tmp/backup.tar.gz
         target_filename: backup.tar.gz
@@ -319,7 +322,8 @@ backup_definitions:
     container: immich-postgres
     backup_commands:
       - pg_dump --clean --if-exists --dbname={{ immich_db_database }} --username={{ immich_db_username }} -f /tmp/immich_db.sql
-      - gzip -f /tmp/immich_db.sql
+      # --rsyncable keeps the gzip stream borg-dedupable night to night
+      - gzip -f --rsyncable /tmp/immich_db.sql
     copy_actions:
       - source_path: /tmp/immich_db.sql.gz
         target_filename: immich_db.sql.gz
