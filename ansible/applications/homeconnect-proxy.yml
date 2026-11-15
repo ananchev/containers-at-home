@@ -81,9 +81,17 @@
               path: "{{ host_directory }}/source"
               rm: true
             name: homeconnect-proxy:latest
+            # Without this an existing :latest is never rebuilt, so code changes
+            # pulled above never went live. The build cache keeps the image ID
+            # (and so the container) unchanged when the source is unchanged
+            # (needs the repo's .dockerignore to keep .git out of the context).
+            force_source: true
 
         - name: Cleanup the non-tagged images
           ansible.builtin.command: docker image prune -f
+          register: image_prune
+          # podman prints the removed IDs (nothing when idle); docker prints "Total reclaimed space: 0B"
+          changed_when: "image_prune.stdout_lines | reject('match', '^(Emulate Docker CLI|Total reclaimed space: 0B)') | list | length > 0"
 
         - name: Run the container
           community.docker.docker_container:
