@@ -25,7 +25,7 @@
 # Detector model: YOLOv9 ONNX in /config/model_cache - kept, restored from the staged
 # backup, or exported on the host (applications/tasks/frigate/model.yml).
 #
-# Needs in the vault:  frigate_camera_password, home_notifier_telegram_token,
+# Needs in the vault:  frigate_camera_password, frigate_go2rtc_api_password, home_notifier_telegram_token,
 #                      home_notifier_telegram_chat_id
 # Needs in app_versions: frigate, frigate-notify
 #
@@ -159,10 +159,13 @@
           devices:
             - /dev/dri:/dev/dri       # VAAPI decode + OpenVINO GPU detector (i3-N305 iGPU)
           ports:
-            # Only the authenticated UI/API is published. 5000 (unauthenticated API, used by
+            # Published: the authenticated UI/API (8971) and go2rtc's HTTP API (1984), which has its
+            # own basic auth (user `openhab`, see config.yml.j2) and feeds the openHAB ipcamera
+            # Things (frame.jpeg / stream.mjpeg). 5000 (unauthenticated API, used by
             # frigate-notify over the docker network) and 8554 (unauthenticated RTSP restream)
             # stay internal.
             - "{{ application_services['frigate'].ports.web }}:8971"
+            - "{{ application_services['frigate'].ports.go2rtc }}:1984"
           volumes:
             - "{{ host_directory }}/config:/config"
             - "{{ frigate_media_root }}/frigate:/media/frigate"
@@ -176,6 +179,9 @@
               read_only: true
           env:
             FRIGATE_RTSP_PASSWORD: "{{ frigate_camera_password }}"
+            # go2rtc expands ${FRIGATE_GO2RTC_API_PASSWORD} in its api block (Frigate itself only
+            # substitutes the rtsp credentials)
+            FRIGATE_GO2RTC_API_PASSWORD: "{{ frigate_go2rtc_api_password }}"
 
       - name: Run frigate-notify
         community.docker.docker_container:

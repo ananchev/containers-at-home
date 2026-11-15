@@ -48,6 +48,15 @@ ffmpeg:
   hwaccel_args: []
 
 go2rtc:
+  # HTTP API on 1984, published on the LAN for openHAB (ipcamera binding): /api/frame.jpeg?src=<stream>
+  # and /api/stream.mjpeg?src=<stream>. Basic auth for everything except localhost (Frigate's own
+  # calls). The password comes from the env var FRIGATE_GO2RTC_API_PASSWORD (vault:
+  # frigate_go2rtc_api_password), expanded by go2rtc.
+  api:
+    listen: ":1984"
+    origin: "*"
+    username: openhab
+    password: "${FRIGATE_GO2RTC_API_PASSWORD}"
   streams:
     terrace:
       - rtsp://{{ frigate_camera_user }}:{FRIGATE_RTSP_PASSWORD}@{{ frigate_camera_ip }}:554/Preview_01_main
