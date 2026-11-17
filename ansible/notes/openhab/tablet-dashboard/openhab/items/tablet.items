@@ -1,0 +1,2 @@
+// Wall tablet (iPad Air 1) dashboard: conf/html/tablet, served at /static/tablet/
+Switch Tablet_NightMode "Tablet night mode" <moon>

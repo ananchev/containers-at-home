@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Home</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Home">
+<meta name="format-detection" content="telephone=no">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="app.css?v=11">
+</head>
+<body>
+<div id="stage">
+  <div id="canvas">
+
+    <!-- ===== Day layout ===== -->
+    <main id="day">
+      <section class="panel clock" id="p-clock">
+        <div class="clock-time"><span id="clk-hm">--:--</span></div>
+        <div class="clock-date tap" id="clk-date">&nbsp;</div>
+        <div class="clock-meta">
+          <span class="meta"><svg class="ic"><use xlink:href="#i-sunrise"/></svg><span id="sun-rise">--:--</span></span>
+          <span class="meta"><svg class="ic"><use xlink:href="#i-sunset"/></svg><span id="sun-set">--:--</span></span>
+          <span class="meta"><svg class="ic"><use xlink:href="#i-home"/></svg><span id="in-temp">--</span></span>
+          <span class="meta"><svg class="ic"><use xlink:href="#i-tree"/></svg><span id="out-meta">--</span></span>
+        </div>
+      </section>
+
+      <section class="panel weather tap" id="p-weather" data-href="page.html#weather">
+        <div class="w-now">
+          <div class="w-icon" id="w-now-icon"></div>
+          <div class="w-temp"><span id="out-temp">--</span><span class="deg">°</span></div>
+          <div class="w-desc">
+            <div id="w-cond">Veranda</div>
+            <div class="muted" id="w-sub">&nbsp;</div>
+          </div>
+        </div>
+        <div class="w-hours" id="w-hours"></div>
+        <div class="w-days" id="w-days"></div>
+      </section>
+
+      <section class="panel power tap" id="p-power" data-href="page.html#energy">
+        <div class="pw-now">
+          <div class="label">Power now</div>
+          <div class="pw-val"><span id="pw-w">--</span><span class="unit">W</span></div>
+          <div class="muted small" id="pw-top">&nbsp;</div>
+        </div>
+        <div class="pw-right">
+          <div class="pw-chart">
+            <svg id="pw-spark" viewBox="0 0 360 64" preserveAspectRatio="none"></svg>
+            <div class="pw-axis"><span>24 h ago</span><span id="pw-peak">&nbsp;</span><span>now</span></div>
+          </div>
+          <div class="pw-stats">
+            <div><span class="label">Today</span><b id="pw-today">--</b><span class="muted" id="pw-today-c"></span></div>
+            <div><span class="label">This month</span><b id="pw-month">--</b><span class="muted" id="pw-month-c"></span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel cams" id="p-cams"></section>
+
+      <section class="panel now" id="p-now">
+        <div class="label">Now</div>
+        <div id="now-list"></div>
+        <div id="now-empty" class="now-empty"><svg class="ic"><use xlink:href="#i-check"/></svg>All quiet</div>
+      </section>
+
+      <nav class="nav" id="nav">
+        <div class="nav-wrap"><div class="nav-links" id="nav-links"></div></div>
+        <button class="btn btn-night" id="btn-night" type="button"><svg class="ic"><use xlink:href="#i-moon"/></svg><span>Night</span></button>
+      </nav>
+    </main>
+
+    <!-- all indicators, when there are more than fit in the Now panel -->
+    <div id="sheet" hidden>
+      <div class="sheet-box">
+        <div class="sheet-head"><span class="label" id="sheet-title">Now</span><span class="sheet-close">Close</span></div>
+        <div class="sheet-list" id="sheet-list"></div>
+      </div>
+    </div>
+
+    <!-- ===== Night layout ===== -->
+    <main id="night" hidden>
+      <div class="n-time" id="n-hm">--:--</div>
+      <div class="n-date" id="n-date">&nbsp;</div>
+      <div class="n-line" id="n-line">&nbsp;</div>
+      <div class="n-alerts" id="n-alerts"></div>
+      <div class="n-hint">Tap to wake</div>
+    </main>
+
+    <div id="conn" class="conn" title="openHAB connection"></div>
+  </div>
+</div>
+
+<!-- full-screen camera -->
+<div id="cam-full" hidden><img id="cam-full-img" alt=""><div class="cam-full-label" id="cam-full-label"></div></div>
+
+
+<script src="core.js?v=13"></script>
+<script src="app.js?v=13"></script>
+</body>
+</html>

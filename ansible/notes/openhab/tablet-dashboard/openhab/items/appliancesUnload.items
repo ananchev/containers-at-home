@@ -1,0 +1,6 @@
+// "Finished, not yet emptied" per appliance, kept by rules/appliancesUnload.rules.
+// Members of the Washer/Dryer/Dishwasher groups, so mapdb restores them after a restart.
+// The washer powers off ~7 min after finishing and then never reports its door, so expire is the fallback.
+Switch Washer_Unemptied     "Washing machine waiting to be emptied" <washingmachine> (Washer)     { expire="12h,command=OFF" }
+Switch Dryer_Unemptied      "Dryer waiting to be emptied"           <dryer>          (Dryer)      { expire="12h,command=OFF" }
+Switch Dishwasher_Unemptied "Dishwasher waiting to be emptied"      <dishwasher>     (Dishwasher) { expire="12h,command=OFF" }

@@ -1,0 +1,26 @@
+// Finished -> waiting to be emptied, until the door opens or a new programme starts.
+// The dishwasher goes Finished -> Ready by itself after a minute, so the state alone cannot tell.
+// Changes from NULL are mapdb restores after a restart, not real events: ignored.
+
+rule "Appliances: finished, waiting to be emptied"
+when
+    Item Washer_State changed to Finished or
+    Item Dryer_State changed to Finished or
+    Item Dishwasher_State changed to Finished
+then
+    if (previousState === NULL || previousState === UNDEF) return;
+    sendCommand(triggeringItemName.split("_").get(0) + "_Unemptied", "ON")
+end
+
+rule "Appliances: emptied (door opened) or new programme"
+when
+    Item Washer_Door changed to Open or
+    Item Dryer_Door changed to Open or
+    Item Dishwasher_Door changed to Open or
+    Item Washer_State changed to Run or
+    Item Dryer_State changed to Run or
+    Item Dishwasher_State changed to Run
+then
+    if (previousState === NULL || previousState === UNDEF) return;
+    sendCommand(triggeringItemName.split("_").get(0) + "_Unemptied", "OFF")
+end

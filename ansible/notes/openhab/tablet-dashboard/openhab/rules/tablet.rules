@@ -1,0 +1,28 @@
+// Wall tablet night mode. The page follows Tablet_NightMode; a tap on the tablet sends ON/OFF
+// to the same item, so a manual change lasts until the next scheduled switch.
+
+rule "Tablet: night mode on"
+when
+    Time cron "0 0 23 * * ?"
+then
+    Tablet_NightMode.sendCommand(ON)
+end
+
+rule "Tablet: night mode off"
+when
+    Time cron "0 30 6 * * ?"
+then
+    Tablet_NightMode.sendCommand(OFF)
+end
+
+rule "Tablet: night mode after startup"
+when
+    System reached start level 100
+then
+    if (Tablet_NightMode.state == NULL) {
+        val h = now.getHour
+        val m = now.getMinute
+        val isNight = h >= 23 || h < 6 || (h == 6 && m < 30)
+        Tablet_NightMode.postUpdate(if (isNight) ON else OFF)
+    }
+end
