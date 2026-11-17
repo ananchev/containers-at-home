@@ -42,7 +42,13 @@
     // "finished" chips follow <App>_Unemptied (appliancesUnload.rules); after this long they turn orange
     unemptiedWarnMs: 60 * 60 * 1000,
     // bin chip in "Now": grey from this many days ahead, orange the day before and on the day
-    binAheadDays: 3
+    binAheadDays: 3,
+    // Home calendar events in "Now": grey from this many days ahead, blue tomorrow, orange on the day
+    eventAheadDays: 3,
+    // a multi-day event longer than this leaves "Now" after its first day (still listed in Upcoming)
+    longEventDays: 4,
+    // "Upcoming" sheet (tap the date / a bin or event chip): bins + events this many days ahead
+    agendaDays: 30
   };
 
   // ------------------------------------------------------------------ preview switches (design only)
@@ -280,10 +286,27 @@
     var b = binText();
     if (b && b.days <= CFG.binAheadDays) {
       var soon = b.days <= 1;
-      out.push({ cls: soon ? 'c-warn' : 'c-mute', icon: 'i-bin', bins: true,
+      out.push({ cls: soon ? 'c-warn' : 'c-mute', icon: 'i-bin', agenda: true,
         t1: st('Garbage_Next') + (b.days === 0 ? ' bin today' : b.days === 1 ? ' bin goes out tonight' : ' bin in ' + b.days + ' days'),
         t2: soon ? (has('Garbage_Following') && st('Garbage_Following') !== '-' ? 'Then ' + st('Garbage_Following') : '') : st('Garbage_NextDate') || '' });
     }
+
+    // holidays: quiet grey chip today / tomorrow only (one per name, countries merged)
+    mergeHolidays(OH.events()).forEach(function (h) {
+      if (h.days <= 1) out.push({ cls: 'c-mute', icon: 'i-star', agenda: true, t1: h.title, t2: (h.days === 0 ? 'Today' : 'Tomorrow') + ' · ' + h.countries.join(', ') });
+    });
+    // family events: grey 2-3 days ahead, blue tomorrow, orange on the (first) day. Multi-day events after
+    // their first day: grey "Day 2 of 3"; longer than CFG.longEventDays: only in Upcoming after day 1
+    OH.events().forEach(function (ev) {
+      if (ev.holiday || ev.days > CFG.eventAheadDays) return;
+      if (ev.dayNo > 1) {
+        if (ev.span > CFG.longEventDays) return;
+        out.push({ cls: 'c-mute', icon: ev.icon, agenda: true, t1: ev.title, t2: 'Day ' + ev.dayNo + ' of ' + ev.span + ' · ' + evWhen(ev, false) });
+        return;
+      }
+      out.push({ cls: ev.days === 0 ? 'c-warn' : ev.days === 1 ? 'c-info' : 'c-mute', icon: ev.icon, agenda: true,
+        t1: ev.title, t2: evWhen(ev, true) });
+    });
 
     var issues = num('System_Issues_Count');
     if (issues > 0) {
@@ -328,7 +351,7 @@
     return true;
   }
   function chipHtml(c) {
-    return '<div class="chip ' + c.cls + (c.clear ? ' clearable' : '') + '"' + (c.clear ? ' data-clear="' + c.clear + '"' : '') + (c.bins ? ' data-bins="1"' : '') + '><div class="ci">' + icon(c.icon) + '</div><div class="ct"><div class="t1">' + esc(c.t1) +
+    return '<div class="chip ' + c.cls + (c.clear ? ' clearable' : '') + '"' + (c.clear ? ' data-clear="' + c.clear + '"' : '') + (c.agenda ? ' data-agenda="1"' : '') + '><div class="ci">' + icon(c.icon) + '</div><div class="ct"><div class="t1">' + esc(c.t1) +
       '</div>' + (c.t2 ? '<div class="t2">' + esc(c.t2) + '</div>' : '') + '</div>' +
       (c.bar > 0 ? '<div class="bar" style="width:' + Math.min(100, c.bar) + '%"></div>' : '') + '</div>';
   }
@@ -344,32 +367,92 @@
       (more ? '<div class="chip-more" id="now-more">+ ' + more + ' more</div>' : '');
     $('now-empty').hidden = n > 0;
     if (!$('sheet').hidden) {
-      if (sheetMode === 'bins') $('sheet-list').innerHTML = binsHtml();
+      if (sheetMode === 'agenda') $('sheet-list').innerHTML = agendaHtml();
       else if (n <= CFG.nowCompact) closeSheet(); else $('sheet-list').innerHTML = chips.map(chipHtml).join('');
     }
   }
-  var sheetMode = null;   // 'now' | 'bins'
+  var sheetMode = null;   // 'now' | 'agenda'
   function openSheet(mode) {
     sheetMode = mode || 'now';
-    $('sheet-title').textContent = sheetMode === 'bins' ? 'Bin pickups' : 'Now';
-    $('sheet-list').innerHTML = sheetMode === 'bins' ? binsHtml() : lastChips.map(chipHtml).join('');
+    $('sheet-title').textContent = sheetMode === 'agenda' ? 'Upcoming' : 'Now';
+    $('sheet-list').innerHTML = sheetMode === 'agenda' ? agendaHtml() : lastChips.map(chipHtml).join('');
     $('sheet').hidden = false;
     clearTimeout(openSheet.t);
     openSheet.t = setTimeout(closeSheet, 60000);
   }
   function closeSheet() { $('sheet').hidden = true; sheetMode = null; }
 
-  // all bins with their next pickup (tap the date under the clock, or a bin chip)
-  function binsHtml() {
-    var list = OH.bins();
-    if (!list.length) return '<div class="now-empty">No bin dates from afvalwijzer</div>';
-    return list.map(function (b) {
-      var cls = isNaN(b.days) ? 'c-mute' : b.days <= 1 ? 'c-warn' : b.days <= CFG.binAheadDays ? 'c-mute' : 'c-plain';
-      var when = isNaN(b.days) ? 'no date' : DAYS[b.date.getDay()] + ' ' + b.date.getDate() + ' ' + MONTHS[b.date.getMonth()].slice(0, 3);
-      var rel = isNaN(b.days) ? '' : b.days === 0 ? 'today' : b.days === 1 ? 'tomorrow (out tonight)' : 'in ' + b.days + ' days';
-      return '<div class="chip ' + cls + '"><div class="ci">' + icon('i-bin') + '</div><div class="ct"><div class="t1">' + esc(b.name) +
-        ' · ' + esc(when) + '</div>' + (rel ? '<div class="t2">' + esc(rel) + '</div>' : '') + '</div></div>';
-    }).join('');
+  // "Today · 14:00–15:00", "Thu 19 Nov · all day", "until Sat 21 Nov", "Fri 18:00 → Sun 14:00"; location appended
+  function dayName(d, days) {
+    return days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()].slice(0, 3);
+  }
+  function shortDate(d) { return DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()].slice(0, 3); }
+  function evWhen(ev, withDay) {
+    var t, timedMulti = !ev.allDay && ev.span > 1;
+    if (ev.allDay) t = ev.span > 1 ? 'until ' + shortDate(ev.last) : 'all day';
+    else if (timedMulti) t = DAYS[ev.start.getDay()] + ' ' + hm(ev.start) + ' → ' + DAYS[ev.end.getDay()] + ' ' + hm(ev.end);
+    else t = ev.ongoing ? 'now, until ' + hm(ev.end) : hm(ev.start) + (ev.end.getTime() > ev.start.getTime() ? '–' + hm(ev.end) : '');
+    var p = [withDay && !timedMulti ? dayName(ev.start, ev.days) + ' · ' + t : t];
+    if (ev.loc) p.push(ev.loc);
+    return p.join(' · ');
+  }
+  // the same holiday in several countries (Christmas NL + BG) becomes one entry: {days, title, countries}
+  function mergeHolidays(list) {
+    var out = [], seen = {};
+    list.forEach(function (ev) {
+      if (!ev.holiday) return;
+      var k = ev.days + '|' + ev.title.toLowerCase();
+      if (!seen[k]) { seen[k] = { days: ev.days, title: ev.title, countries: [] }; out.push(seen[k]); }
+      if (seen[k].countries.indexOf(ev.holiday) < 0) seen[k].countries.push(ev.holiday);
+    });
+    return out;
+  }
+
+  // bins + home calendar events, grouped by day (tap the date under the clock, or a bin / event chip).
+  // Multi-day events are listed on every day they cover ("(2/3)"); holidays sit in the day header.
+  function agendaHtml() {
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var rows = [], nodate = [], hol = {};
+    function dateOf(days) { var d = new Date(today.getTime()); d.setDate(d.getDate() + days); return d; }
+    OH.bins().forEach(function (b) {
+      if (isNaN(b.days)) { nodate.push(b); return; }
+      if (b.days > CFG.agendaDays) return;
+      rows.push({ days: b.days, order: -1, html: chipRow(b.days <= 1 ? 'c-warn' : b.days <= CFG.binAheadDays ? 'c-mute' : 'c-plain', 'i-bin',
+        b.name + ' bin', b.days === 1 ? 'goes out tonight' : 'pickup') });
+    });
+    var evs = OH.events();
+    mergeHolidays(evs).forEach(function (h) {
+      if (h.days > CFG.agendaDays) return;
+      (hol[h.days] = hol[h.days] || []).push(h.title + ' (' + h.countries.join(', ') + ')');
+    });
+    evs.forEach(function (ev, i) {
+      if (ev.holiday) return;
+      for (var k = ev.dayNo - 1; k < ev.span; k++) {
+        var days = ev.days + k - (ev.dayNo - 1);
+        if (days > CFG.agendaDays) break;
+        var first = k === 0;   // only the start day is coloured; continuation days stay plain
+        var cls = !first ? 'c-plain' : days === 0 ? 'c-warn' : days === 1 ? 'c-info' : days <= CFG.eventAheadDays ? 'c-mute' : 'c-plain';
+        rows.push({ days: days, order: i, html: chipRow(cls, ev.icon, ev.title + (ev.span > 1 ? ' (' + (k + 1) + '/' + ev.span + ')' : ''),
+          evWhen(ev, false) + (ev.cats.length ? ' · ' + ev.cats.join(', ') : '')) });
+      }
+    });
+    Object.keys(hol).forEach(function (d) { rows.push({ days: +d, order: -2, html: '' }); });   // header-only days
+    rows.sort(function (x, y) { return x.days - y.days || x.order - y.order; });
+    var html = '', day = -1;
+    rows.forEach(function (r) {
+      if (r.days !== day) {
+        day = r.days;
+        html += '<div class="ag-day">' + esc(dayName(dateOf(r.days), r.days)) +
+          (hol[r.days] ? '<span class="ag-hol">' + icon('i-star') + esc(hol[r.days].join(' · ')) + '</span>' : '') + '</div>';
+      }
+      html += r.html;
+    });
+    if (nodate.length) html += '<div class="ag-day">No date</div>' + nodate.map(function (b) { return chipRow('c-mute', 'i-bin', b.name + ' bin', 'no date from afvalwijzer'); }).join('');
+    return html || '<div class="now-empty">Nothing in the next ' + CFG.agendaDays + ' days</div>';
+  }
+  function chipRow(cls, ic, t1, t2) {
+    return '<div class="chip ' + cls + '"><div class="ci">' + icon(ic) + '</div><div class="ct"><div class="t1">' + esc(t1) + '</div>' +
+      (t2 ? '<div class="t2">' + esc(t2) + '</div>' : '') + '</div></div>';
   }
 
   // ------------------------------------------------------------------ nav
@@ -405,6 +488,8 @@
     if (!isNaN(t)) line.push(fmt(t, 1) + '° outside');
     var b = binText();
     if (b) line.push('Next bin: ' + b.text);
+    var ne = OH.events().filter(function (ev) { return ev.days <= 1 && ev.dayNo === 1 && !ev.holiday; })[0];
+    if (ne) line.push((ne.days === 0 ? 'Today: ' : 'Tomorrow: ') + ne.title + (ne.allDay ? '' : ' ' + hm(ne.start)));
     $('n-line').textContent = line.join('   ·   ');
     $('n-alerts').innerHTML = chips.filter(function (c) { return c.cls === 'c-bad' || c.cls === 'c-warn' || c.cls === 'c-info'; })
       .slice(0, 4).map(function (c) { return '<span class="n-alert ' + c.cls + '">' + icon(c.icon) + esc(c.t1) + '</span>'; }).join('');
@@ -433,12 +518,12 @@
     $('cam-full').addEventListener('click', closeCam);
     $('p-now').addEventListener('click', function (e) {
       if (chipTap(e)) return;
-      if (e.target.closest('[data-bins]')) openSheet('bins'); else if (e.target.closest('#now-more')) openSheet();
+      if (e.target.closest('[data-agenda]')) openSheet('agenda'); else if (e.target.closest('#now-more')) openSheet();
     });
-    $('clk-date').addEventListener('click', function () { openSheet('bins'); });
+    $('clk-date').addEventListener('click', function () { openSheet('agenda'); });
     $('sheet').addEventListener('click', function (e) {
       if (chipTap(e)) return;
-      if (e.target.closest('[data-bins]')) { openSheet('bins'); return; }
+      if (e.target.closest('[data-agenda]')) { openSheet('agenda'); return; }
       if (!e.target.closest('.sheet-list') || e.target.closest('.sheet-close')) closeSheet();
     });
     $('p-power').addEventListener('click', function () { location.href = OH.link(this.getAttribute('data-href')); });

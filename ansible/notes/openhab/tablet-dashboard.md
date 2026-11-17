@@ -13,7 +13,7 @@ not the Main UI: Main UI is too heavy for this device, so the page is plain HTML
 ## Layout (1024 x 768, landscape, scaled to fit any other window)
 
 * Clock with date, sunrise/sunset, inside temperature (Metriful) and outside temperature (veranda).
-  Tap the date for "Bin pickups": every `Garbagebinscollectiondates_*` item, sorted, with days to go.
+  Tap the date for "Upcoming": bins (`Garbagebinscollectiondates_*`) + Home calendar events (`HomeCal_Events`, see `home-calendar/README.md`) for 30 days, grouped by day.
 * Weather: outside temperature from the veranda sensor; conditions, the next 12 h (2 h
   steps) and 3 days from Open-Meteo, fetched by the browser with rounded coordinates. A tap opens
   `page.html#weather` (not a tab): now (veranda temp/humidity + model feels-like, wind/gusts,
@@ -26,7 +26,7 @@ not the Main UI: Main UI is too heavy for this device, so the page is plain HTML
   (closes after 2 min). Up to 3 from `CFG.cameras` in `app.js` share the panel; one that sees a
   person gets double width.
 * "Now": indicators that only appear when relevant. Appliances running, paused, needing
-  attention, or finished within 3 h; hood on; bin within 3 days (grey 2-3 days ahead, orange tomorrow/today; tap opens Bin pickups); system issues; a person
+  attention, or finished within 3 h; hood on; bin within 3 days (grey 2-3 days ahead, orange tomorrow/today); Home calendar events within 3 days (grey 2-3 days, blue tomorrow, orange today; icon by category); a tap on either opens Upcoming; system issues; a person
   on a camera; heating mode not Auto; watering.
 * "Now" overflow: the indicators are sorted by importance (red, orange, violet, blue, green). Up to
   4 show at full size, 5-6 compact; with more, 5 compact plus a "+N more" row that opens
@@ -108,7 +108,7 @@ copies in `tablet-dashboard/openhab/`):
   set from the time of day if NULL.
 * On the page, the Night button sends ON, and a tap on the night screen sends OFF, so a manual
   change lasts until the next scheduled switch.
-* Night screen: black, a dim warm clock, outside temperature, the next bin and active alerts.
+* Night screen: black, a dim warm clock, outside temperature, the next bin, today's/tomorrow's first calendar event and active alerts.
   The page cannot dim the backlight. Use the iPad brightness setting or Guided Access auto-lock.
 
 ## iOS home-screen app quirks (seen 2026-11-15)

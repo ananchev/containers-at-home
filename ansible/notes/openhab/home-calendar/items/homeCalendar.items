@@ -1,0 +1,7 @@
+// Shared "Home" calendar (Nextcloud user `home`), filled by automation/js/homeCalendar.js.
+// HomeCal_Events: JSON array, next 60 days, sorted by start:
+//   {uid, rid?, t: title, s/e: 'YYYY-MM-DD' (all-day, e exclusive) or epoch ms, ad?: true, c?: [categories], loc?}
+String   HomeCal_Events  "Home calendar events"
+String   HomeCal_Status  "Home calendar [%s]"                        <calendar>
+DateTime HomeCal_Updated "Home calendar updated [%1$td.%1$tm %1$tH:%1$tM]" <calendar>
+Switch   HomeCal_Refresh "Refresh home calendar"                     <calendar>  { autoupdate="false" }

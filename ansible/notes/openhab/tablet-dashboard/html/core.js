@@ -156,7 +156,12 @@
     'i-gauge': '<path d="M4 18a8 8 0 1 1 16 0"/><path d="m12 18 4-6"/>',
     'i-tree': '<path d="M12 21v-4"/><path d="M12 3 6.5 11H9l-3.5 6h13L15 11h2.5z"/>',
     'i-umbrella': '<path d="M3 12a9 9 0 0 1 18 0z"/><path d="M12 12v7a2 2 0 0 1-4 0"/>',
-    'i-leaf': '<path d="M5 19c0-8 5-14 15-14 0 10-6 15-14 15"/><path d="M5 19 13 11"/>'
+    'i-leaf': '<path d="M5 19c0-8 5-14 15-14 0 10-6 15-14 15"/><path d="M5 19 13 11"/>',
+    'i-cake': '<path d="M4 21h16M5 21v-7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v7"/><path d="M5 16c1.2 1 2.3 1 3.5 0s2.3-1 3.5 0 2.3 1 3.5 0 2.3-1 3.5 0M12 12V8M12 5.5c-.8-1-.4-2 0-2.5.4.5.8 1.5 0 2.5z"/>',
+    'i-heart': '<path d="M12 20s-7.5-4.5-7.5-10A4.2 4.2 0 0 1 12 7.5 4.2 4.2 0 0 1 19.5 10c0 5.5-7.5 10-7.5 10z"/>',
+    'i-book': '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/>',
+    'i-plane': '<path d="M10.5 13.5 3 11l1.5-1.5 8 1L17 6a2.1 2.1 0 0 1 3 3l-4.5 4.5 1 8L15 23l-2.5-7.5L9 19v3l-1.5 1L6 19l-4-1.5L3 16h3z"/>',
+    'i-ball': '<circle cx="12" cy="12" r="9"/><path d="M3.5 9.5c5 1 12 1 17 0M3.5 14.5c5-1 12-1 17 0M12 3c-3 5-3 13 0 18"/>'
   };
   function injectSprite() {
     if ($('oh-sprite')) return;
@@ -345,14 +350,54 @@
     return out;
   }
 
+  // Home calendar (HomeCal_Events, homeCalendar.js in openHAB): events with Date start/end, days from
+  // today to the start day (0 while an event is ongoing), sorted by start. Category -> icon: first match.
+  var CAL_ICONS = [
+    [/birthday|verjaardag|anniversary/i, 'i-cake'],
+    [/health|doctor|dentist|medical|arts/i, 'i-heart'],
+    [/school|kids|study/i, 'i-book'],
+    [/travel|holiday|vacation|vakantie|trip/i, 'i-plane'],
+    [/sport|swim|football|gym/i, 'i-ball'],
+    [/visit|guest|friends|family/i, 'i-person'],
+    [/home|house|repair|maintenance/i, 'i-home']
+  ];
+  function calIcon(cats) {
+    for (var i = 0; i < CAL_ICONS.length; i++) for (var j = 0; j < cats.length; j++) if (CAL_ICONS[i][0].test(cats[j])) return CAL_ICONS[i][1];
+    return 'i-calendar';
+  }
+  function ymd(s) { var p = s.split('-'); return new Date(+p[0], p[1] - 1, +p[2]); }
+  var evCache = { raw: null, list: [] };
+  var DAY_MS = 86400000;
+  function midnight(d) { var m = new Date(d.getTime()); m.setHours(0, 0, 0, 0); return m; }
+  function dayDiff(a, b) { return Math.round((midnight(a).getTime() - midnight(b).getTime()) / DAY_MS); }   // DST-safe enough (rounded)
+  // events still to come or running. days: start day - today (0 once started); span: calendar days covered;
+  // dayNo: which of those days today is (1 before / on the first day); holiday: country code (NL, BG) or ''
+  function events() {
+    var raw = has('HomeCal_Events') ? st('HomeCal_Events') : '';
+    if (raw !== evCache.raw) {
+      evCache.raw = raw;
+      try { evCache.list = JSON.parse(raw || '[]'); } catch (e) { evCache.list = []; }
+    }
+    var now = Date.now(), today = midnight(new Date());
+    return evCache.list.map(function (o) {
+      var s = o.ad ? ymd(o.s) : new Date(o.s), e = o.ad ? ymd(o.e) : new Date(o.e);
+      var last = o.ad ? new Date(e.getTime() - DAY_MS) : new Date(Math.max(s.getTime(), e.getTime() - 1));
+      var span = Math.max(1, dayDiff(last, s) + 1), d = dayDiff(s, today);
+      var cats = o.c || [];
+      return { title: o.t, uid: o.uid, allDay: !!o.ad, start: s, end: e, last: last, span: span, cats: cats, loc: o.loc || '',
+        icon: o.h ? 'i-star' : calIcon(cats), holiday: o.h || '', days: d < 0 ? 0 : d, dayNo: d < 0 ? 1 - d : 1,
+        ongoing: s.getTime() <= now };
+    }).filter(function (ev) { return ev.end.getTime() > now; });
+  }
+
   // openHAB /static sends Cache-Control max-age=1 year, so a plain link to page.html / index.html
   // can open a stale copy that loads old scripts (2026-11-17: the new weather page bounced back
   // home). Links between the pages carry this version: bump it on every deploy that changes them.
-  var PAGES_V = '13';
+  var PAGES_V = '15';
   function link(href) { var i = href.indexOf('#'); return (i < 0 ? href : href.slice(0, i)) + '?v=' + PAGES_V + (i < 0 ? '' : href.slice(i)); }
 
   window.OH = {
-    link: link, LOCATION: LOCATION, WX_TEXT: WX_TEXT, wxIcon: wxIcon, compass: compass, bins: bins,
+    link: link, LOCATION: LOCATION, WX_TEXT: WX_TEXT, wxIcon: wxIcon, compass: compass, bins: bins, events: events, dayDiff: dayDiff,
     Q: Q, demo: demo, CAMERAS: CAMERAS, APPLIANCES: APPLIANCES, camLoop: camLoop,
     S: S, $: $, pad: pad, hm: hm, st: st, has: has, num: num, esc: esc, icon: icon, fmt: fmt, ago: ago,
     parseLocal: parseLocal, getJSON: getJSON, command: command, rerender: rerender, start: start,
