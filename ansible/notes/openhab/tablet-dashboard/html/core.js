@@ -393,7 +393,7 @@
   // openHAB /static sends Cache-Control max-age=1 year, so a plain link to page.html / index.html
   // can open a stale copy that loads old scripts (2026-11-17: the new weather page bounced back
   // home). Links between the pages carry this version: bump it on every deploy that changes them.
-  var PAGES_V = '15';
+  var PAGES_V = '16';
   function link(href) { var i = href.indexOf('#'); return (i < 0 ? href : href.slice(0, i)) + '?v=' + PAGES_V + (i < 0 ? '' : href.slice(i)); }
 
   window.OH = {

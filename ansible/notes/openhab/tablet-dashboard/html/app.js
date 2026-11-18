@@ -269,14 +269,15 @@
         out.push({ cls: 'c-bad', icon: a.icon, t1: a.name + (s === 'Error' ? ': error' : ' needs attention'), t2: prog });
       }
       // finished and not yet emptied: openHAB keeps <App>_Unemptied (ON at Finished, OFF when the door
-      // opens, a programme starts, after 12 h, or when cleared here with two taps)
+      // opens, a programme starts, the dryer starts (washer), after 12 h / 4 h (washer), or when cleared here with two taps)
       var un = a.key + '_Unemptied';
       if (st(un) === 'ON' && s !== 'Run') {
-        var lc = S[un].lc, late = lc && now - lc > CFG.unemptiedWarnMs;
+        // machine powered off: its door can no longer be reported, so we only know it *may* be full (grey, no escalation)
+        var lc = S[un].lc, off = st(a.key + '_Online') === 'OFF', late = !off && lc && now - lc > CFG.unemptiedWarnMs;
         var confirm = pendingClear.item === un && now < pendingClear.until;
-        out.push({ cls: late ? 'c-warn' : 'c-ok', icon: a.icon, clear: un,
-          t1: a.name + (late ? ' still full' : ' finished'),
-          t2: confirm ? 'Tap again to clear' : (prog ? prog + ' · ' : '') + (lc ? 'finished ' + ago(lc) : '') });
+        out.push({ cls: off ? 'c-mute' : late ? 'c-warn' : 'c-ok', icon: a.icon, clear: un,
+          t1: a.name + (off ? ' may still be full' : late ? ' still full' : ' finished'),
+          t2: confirm ? 'Tap again to clear' : (prog ? prog + ' · ' : '') + (lc ? 'finished ' + ago(lc) : '') + (off ? ' · machine off' : '') });
       }
     });
 

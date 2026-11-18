@@ -433,8 +433,9 @@
         var on = st(k + '_Unemptied') === 'ON', lc = OH.S[k + '_Unemptied'] ? OH.S[k + '_Unemptied'].lc : 0;
         el.style.display = on ? '' : 'none';
         if (!on) return;
-        cls(el, 'unload' + (lc && Date.now() - lc > 3600000 ? ' late' : ''));
-        setText(el.querySelector('span'), 'Waiting to be emptied' + (lc ? ' · finished ' + OH.ago(lc) : ''));
+        var off = st(k + '_Online') === 'OFF';
+        cls(el, 'unload' + (!off && lc && Date.now() - lc > 3600000 ? ' late' : ''));
+        setText(el.querySelector('span'), (off ? 'May still be full (machine off)' : 'Waiting to be emptied') + (lc ? ' · finished ' + OH.ago(lc) : ''));
       });
       return card({ cls: 'appl', title: a.name, icon: a.icon, body:
         '<div class="status" id="' + sid + '"></div><div class="prog" id="' + pid + '"><i></i></div>' +

@@ -24,3 +24,13 @@ then
     if (previousState === NULL || previousState === UNDEF) return;
     sendCommand(triggeringItemName.split("_").get(0) + "_Unemptied", "OFF")
 end
+
+// The washer powers off ~7 min after finishing and the door opening is then never reported.
+// A dryer start means the laundry came out of the washer, so clear the washer too.
+rule "Appliances: dryer started, washer was emptied"
+when
+    Item Dryer_State changed to Run
+then
+    if (previousState === NULL || previousState === UNDEF) return;
+    if (Washer_Unemptied.state == ON) Washer_Unemptied.sendCommand(OFF)
+end
