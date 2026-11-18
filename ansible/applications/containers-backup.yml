@@ -10,7 +10,24 @@
   tasks:
     - name: Run only on the on the designated host
       block:
-      
+
+      # Preflight: the nightly runner renders the WHOLE backup_definitions list with
+      # this host's vars before any per-item `when` applies, so one host-only var used
+      # without `| default('')` kills that host's night (memos/backup_destination on
+      # unas 11-17, memos/filestore_root on pi5 11-18). Render it here with the same
+      # vars so such a bug fails the deploy instead of the 03:00 run. Checks the local
+      # working tree; the image is built from GitHub, so push before deploying.
+      - name: Preflight - load backup_definitions as the runner will
+        ansible.builtin.include_vars:
+          file: ../backups/backup_definitions.yml
+
+      - name: Preflight - backup_definitions must render for this host
+        ansible.builtin.assert:
+          that: (backup_definitions | to_json | length) > 0
+          quiet: true
+        vars:
+          backup_timestamp: preflight
+
       - name: Create build directory
         file:
           path: "{{ host_directory }}"

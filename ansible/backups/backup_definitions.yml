@@ -218,13 +218,15 @@ backup_definitions:
   # memos attachments (LOCAL storage, ~100M of png/jpg/pdf). Archived on the host:
   # the memos image only ships busybox tar. Already-compressed media, so xz buys
   # little; gzip --rsyncable keeps the archive borg-dedupable night to night.
+  # filestore_root needs `| default('')` for the same reason as docs_bridge_data_root
+  # (top of file): only unraid/vhost define it; pi5 crashed on it 2026-11-18.
   - application: memos
     container: memos
     backup_commands: []
     host_commands:
       - >-
         set -o pipefail;
-        tar -C {{ filestore_root }}/memos --numeric-owner -cf - . | gzip -n --rsyncable
+        tar -C {{ filestore_root | default('') }}/memos --numeric-owner -cf - . | gzip -n --rsyncable
         > "{{ backups_directory }}/{{ backup_timestamp }}/memos/attachments.tar.gz"
     copy_actions: []
 
