@@ -194,20 +194,16 @@ function tick() {
     if (st.get('lastLevel') !== r.level) { st.put('lastLevel', r.level); st.put('levelSince', nowMs); }
     const stuckMin = Math.floor((nowMs - (st.get('levelSince') || nowMs)) / 60000);
 
-    // ---- decide (hysteresis: between the marks keep what we had)
+    // ---- decide (hysteresis: between the marks keep what we had, so the direction is the reason)
     const low = num('TabletBattery_Low', 40), high = num('TabletBattery_High', 70);
     if (r.level < 95 && stuckMin >= STALE_MIN) {
       want = true; failsafe = true; reason = 'failsafe: reading stuck';
       active.stale = {};
-    } else if (r.level <= low) {
-      want = true; reason = 'low mark ' + low + '%';
-    } else if (r.level >= high) {
-      want = false; reason = 'high mark ' + high + '%';
     } else {
-      want = state('TabletBattery_Desired') !== 'OFF';
-      reason = state('TabletBattery_Reason');
-      // between the marks the last mark explains the direction; anything else is history
-      if (!/^(low|high) mark/.test(reason)) reason = 'between the marks';
+      if (r.level <= low) want = true;
+      else if (r.level >= high) want = false;
+      else want = state('TabletBattery_Desired') !== 'OFF';
+      reason = want ? 'charging up to ' + high + '%' : 'draining down to ' + low + '%';
     }
 
     // ---- plug ON but no power at the iPad: cable, charger or plug fault
@@ -225,7 +221,7 @@ function tick() {
     items.getItem('TabletBattery_Desired').postUpdate(wantCmd);
     // failsafe switches are covered by their alert; only normal control is announced
     if (enabled && !failsafe && state('TabletBattery_Notify') !== 'OFF') {
-      telegram((want ? '🔌 ' : '🔋 ') + NAME + ': charging ' + wantCmd + ', battery ' + r.level + '% (' + reason + ').');
+      telegram((want ? '🔌 ' : '🔋 ') + NAME + ': plug ' + wantCmd + ' at ' + r.level + '%, ' + reason + '.');
     }
   }
   setIf('TabletBattery_Reason', reason);
@@ -267,8 +263,10 @@ function statusText() {
       ' (last ' + pct('TabletBattery_Level') + ')');
   }
   if (lastRead) lines.push('Last read: ' + dayHhmm(lastRead));
-  lines.push('Plug: ' + state('TabletPlug_State') + ' (' + state('TabletPlug_Power') + ') · wanted ' +
-    state('TabletBattery_Desired') + ': ' + state('TabletBattery_Reason'));
+  // "wanted" only when the plug does not match the decision (plug_ignores territory)
+  const plugS = state('TabletPlug_State'), desired = state('TabletBattery_Desired');
+  lines.push('Plug: ' + plugS + ' (' + state('TabletPlug_Power') + ') · ' + state('TabletBattery_Reason') +
+    (plugS !== desired ? ' · wanted ' + desired : ''));
   lines.push('Control: ' + (state('TabletBattery_Enabled') === 'ON' ? 'enabled' : 'DISABLED (hands off)') +
     ' · ' + num('TabletBattery_Low', 40) + '–' + num('TabletBattery_High', 70) + '%');
   lines.push('Alerts: ' + (valid(alerts) ? alerts.split(',').join(', ') : 'none'));

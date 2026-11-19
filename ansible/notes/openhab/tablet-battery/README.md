@@ -47,7 +47,8 @@ Alerts: `TabletBattery_Alert` holds the active alert keys (`unreadable`, `stale`
 `plug_ignores`, `plug_offline`, or `-`). When a key appears, its message is sent once, saying what is
 wrong, what the failsafe did and what to do. When the key clears, a ✅ message is sent with the
 duration. Switches made by the failsafe are not announced separately, because the alert covers them.
-Normal switching sends `🔌/🔋 Dashboard iPad: charging ON/OFF, battery 40% (low mark 40%)`
+Normal switching sends `🔌 Dashboard iPad: plug ON at 40%, charging up to 70%.` or
+`🔋 … plug OFF at 70%, draining down to 40%.`
 (turn these off with `TabletBattery_Notify` OFF).
 
 `TabletBattery_Enabled` OFF = hands off: openHAB does not switch the plug, but readings and alerts continue.
