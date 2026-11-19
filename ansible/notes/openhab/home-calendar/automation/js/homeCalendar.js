@@ -249,8 +249,8 @@ const sent = cache.private;          // alert keys already sent (lost on restart
 function telegram(text) {
   const bot = actions.thingActions('telegram', BOT);
   if (!bot) { logger.warn('Telegram Thing ' + BOT + ' missing; message was: ' + text); return; }
-  // sendTelegram treats its text as a format string: escape %
-  if (bot.sendTelegram(text.replace(/%/g, '%%')) !== true) logger.warn('Telegram send failed: ' + text);
+  // the single-String sendTelegram sends the text as is (escaping % showed up as %%)
+  if (bot.sendTelegram(text) !== true) logger.warn('Telegram send failed: ' + text);
   else logger.info('Telegram: ' + text);
 }
 
