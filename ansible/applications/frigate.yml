@@ -60,7 +60,7 @@
 
     # Telegram alerts only OUTSIDE this window (i.e. evening/night 18:00-06:00).
     frigate_notify_quiet_start: "06:00"
-    frigate_notify_quiet_end: "18:00"
+    frigate_notify_quiet_end: "23:00"
 
     frigate_public_url: "http://{{ lan_addresses.unas }}:{{ application_services['frigate'].ports.web }}"
 
