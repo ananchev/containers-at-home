@@ -553,13 +553,13 @@
   var OUT_T = 'VerandaTemperatureHumidity_Temperature', OUT_H = 'VerandaTemperatureHumidity_Humidity';
   function loadWx() {
     var L = OH.LOCATION, base = '?latitude=' + L.lat + '&longitude=' + L.lon + '&timezone=Europe%2FAmsterdam';
-    OH.getJSON('https://api.open-meteo.com/v1/forecast' + base +
+    OH.getJSON(OH.METEO + '/v1/forecast' + base +
       '&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,is_day,wind_speed_10m,wind_gusts_10m,wind_direction_10m,pressure_msl,cloud_cover,uv_index' +
       '&minutely_15=precipitation&forecast_minutely_15=12' +
       '&hourly=temperature_2m,precipitation_probability,precipitation,weather_code,is_day,wind_speed_10m' +
       '&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,uv_index_max,sunshine_duration' +
       '&forecast_days=7').then(function (j) { WXP.f = j; WXP.t = Date.now(); drawWx(); }).catch(function () { var e = $('wx-upd'); if (e) e.textContent = 'Forecast unavailable'; });
-    OH.getJSON('https://air-quality-api.open-meteo.com/v1/air-quality' + base +
+    OH.getJSON(OH.METEO + '/v1/air-quality' + base +
       '&current=european_aqi,pm2_5,pm10,alder_pollen,birch_pollen,grass_pollen,mugwort_pollen,ragweed_pollen')
       .then(function (j) { WXP.aq = j; drawAq(); }).catch(function () {});
   }

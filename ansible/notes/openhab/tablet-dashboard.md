@@ -148,3 +148,37 @@ Use `xlink:href` in `<use>`. Parse local date strings by hand (Safari 12 reads
    no browser bar.
 2. Settings > General > Accessibility > Guided Access on; start it in the app (triple-click home).
 3. Charging: the smart plug, see `smart-plug-lspa9.md`.
+
+## Weather via the meteo.iot proxy (no internet on the iPad)
+
+The iPad is cut off from the internet (edge `WAN_OUT rule 6`; disable that rule to give it internet
+temporarily). The page fetches open-meteo through `http://meteo.iot` (`OH.METEO` in `core.js`), which is an NPM proxy
+host on pi5. It is kept only in NPM's database, so rebuild it by hand if it gets lost:
+
+* edge dnsmasq `30-iot-dhcp.conf`: `host-record=meteo.iot,192.168.2.11`; `LAN_IN rule 130` allows the iPad to pi5:80,1234.
+* NPM proxy host `meteo.iot`, HTTP only, Publicly Accessible (the filter is in Advanced), Advanced:
+
+```nginx
+resolver 192.168.2.254 ipv6=off valid=60s;   # pi5 has no IPv6 route; AAAA answers made requests fail
+allow 192.168.2.0/24;
+allow 192.168.5.106;
+deny  all;
+proxy_ssl_server_name on;
+location /v1/forecast {
+    set $om_host api.open-meteo.com;
+    proxy_set_header Host $om_host;
+    proxy_ssl_name $om_host;
+    proxy_pass https://$om_host$request_uri;
+}
+location /v1/air-quality {
+    set $om_host air-quality-api.open-meteo.com;
+    proxy_set_header Host $om_host;
+    proxy_ssl_name $om_host;
+    proxy_pass https://$om_host$request_uri;
+}
+location / { return 404; }
+```
+
+NPM always sends the client's `Host` upstream, and open-meteo rejects `meteo.iot`, so the locations are written
+by hand in Advanced. A `location /` there makes NPM drop its own default location. Test:
+`curl -H 'Host: meteo.iot' 'http://192.168.2.11/v1/forecast?latitude=52&longitude=5&current=temperature_2m'`.

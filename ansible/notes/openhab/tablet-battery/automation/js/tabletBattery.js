@@ -26,7 +26,7 @@ const logger = log('tabletBattery');
 const NAME = 'Dashboard iPad';
 const Duration = Java.type('java.time.Duration');
 const SSH = ['ssh', '-F', '/openhab/userdata/ssh/config', 'dashboard-ipad'];
-const REMOTE = 'ioreg -rn AppleARMPMUCharger | grep -E \'"(CurrentCapacity|IsCharging|ExternalConnected|FullyCharged)" =\'';
+const REMOTE = 'ioreg -rn AppleARMPMUCharger | grep -E \'"(CurrentCapacity|IsCharging|ExternalConnected|FullyCharged|Temperature|Voltage|InstantAmperage)" =\'';
 const BOT = 'telegram:telegramBot:home';
 const MQTT_BROKER = 'mqtt:broker:c60e6d09';
 
@@ -137,7 +137,10 @@ function publishAlerts(active, ctx) {
 }
 
 // ------------------------------------------------------------------ battery reading
-// one ssh round trip (~1 s); returns {level, charging, connected, full} or {error}
+// one ssh round trip (~1 s); returns {level, charging, connected, full, extra} or {error}
+// extra (each may be missing): tempC (Temperature is in 1/100 °C), volt (mV), mA (InstantAmperage is an
+// unsigned 64-bit print of a signed value: negative = draining). CycleCount and capacity are not read: the
+// aftermarket battery's gauge reports nonsense (1 cycle, 100 % health).
 function readBattery() {
   let out;
   try {
@@ -150,7 +153,21 @@ function readBattery() {
   out.replace(/"(\w+)" = (\S+)/g, (m, k, val) => { v[k] = val; return m; });
   const level = parseInt(v.CurrentCapacity, 10);
   if (isNaN(level) || level < 0 || level > 100) return { error: (out.trim() || 'no output (timeout?)').slice(0, 200) };
-  return { level, charging: v.IsCharging === 'Yes', connected: v.ExternalConnected === 'Yes', full: v.FullyCharged === 'Yes' };
+  const int = (k) => (/^\d+$/.test(v[k] || '') ? parseInt(v[k], 10) : NaN);
+  const extra = {};
+  if (!isNaN(int('Temperature'))) extra.tempC = int('Temperature') / 100;
+  if (!isNaN(int('Voltage'))) extra.volt = int('Voltage') / 1000;
+  if (/^\d+$/.test(v.InstantAmperage || '')) extra.mA = Number(BigInt.asIntN(64, BigInt(v.InstantAmperage)));
+  return { level, charging: v.IsCharging === 'Yes', connected: v.ExternalConnected === 'Yes', full: v.FullyCharged === 'Yes', extra };
+}
+
+// battery temperature, voltage, current, power (for the wear/drain review)
+function postExtra(x) {
+  const up = (name, value) => items.getItem(name).postUpdate(value);
+  if (x.tempC !== undefined) up('TabletBattery_Temperature', x.tempC.toFixed(1) + ' °C');
+  if (x.volt !== undefined) up('TabletBattery_Voltage', x.volt.toFixed(3) + ' V');
+  if (x.mA !== undefined) up('TabletBattery_Current', x.mA + ' mA');
+  if (x.mA !== undefined && x.volt !== undefined) up('TabletBattery_Power', (x.mA * x.volt / 1000).toFixed(2) + ' W');
 }
 
 function tick() {
@@ -188,6 +205,7 @@ function tick() {
     setIf('TabletBattery_Level', r.level);
     setIf('TabletBattery_Charging', r.charging ? 'ON' : 'OFF');
     setIf('TabletBattery_Connected', r.connected ? 'ON' : 'OFF');
+    try { postExtra(r.extra); } catch (e) { logger.warn('Battery extras not posted: ' + e); }
     items.getItem('TabletBattery_LastRead').postUpdate(time.ZonedDateTime.now());
 
     // ---- stale: a live reading should move while it charges or drains
@@ -261,6 +279,13 @@ function statusText() {
     const since = itemMs('TabletBattery_UnreadableSince');
     lines.push('Battery: UNREADABLE' + (since ? ' since ' + dayHhmm(since) : '') +
       ' (last ' + pct('TabletBattery_Level') + ')');
+  }
+  if (readable) {
+    const w = num('TabletBattery_Power', NaN), t = num('TabletBattery_Temperature', NaN);
+    const parts = [];
+    if (!isNaN(t)) parts.push(t.toFixed(1) + ' °C');
+    if (!isNaN(w)) parts.push((w < 0 ? 'draining ' : 'charging ') + Math.abs(w).toFixed(1) + ' W');
+    if (parts.length) lines.push('Cell: ' + parts.join(' · '));
   }
   if (lastRead) lines.push('Last read: ' + dayHhmm(lastRead));
   // "wanted" only when the plug does not match the decision (plug_ignores territory)

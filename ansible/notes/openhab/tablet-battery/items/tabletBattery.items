@@ -17,13 +17,17 @@ Number:Energy TabletPlug_Energy      "Energy [%.2f kWh]"        <energy>      (g
 Number TabletPlug_LinkQuality "Zigbee link quality [%d]"        <network>     (gTabletBattery, DashboardIPadPlug) ["Measurement","SignalStrength"] { channel="mqtt:topic:tabletPlug:linkquality" }
 String TabletPlug_Online      "Zigbee availability [%s]"        <network>     (gTabletBattery, DashboardIPadPlug) ["Status","QualityOfService"] { channel="mqtt:topic:tabletPlug:availability" }
 
-// --- read from the iPad (ioreg over ssh, every minute) ---
+// --- read from the iPad (ioreg over ssh, every minute); Current/Power negative = draining ---
 Number TabletBattery_Level           "Battery [%d %%]"                     <battery>     (gTabletBattery, restore_on_startup, persist_on_change, DashboardIPad) ["Measurement","StateOfCharge"]
 Switch TabletBattery_Charging        "Charging"                            <energy>      (gTabletBattery, persist_on_change, DashboardIPad) ["Status","Power"]
 Switch TabletBattery_Connected       "Charger connected"                    <poweroutlet> (gTabletBattery, persist_on_change, DashboardIPad) ["Status","Power"]
 Switch TabletBattery_Reachable       "Battery readable (SSH)"                    <network>     (gTabletBattery, restore_on_startup, persist_on_change, DashboardIPad) ["Status","QualityOfService"]
 DateTime TabletBattery_LastRead        "Battery read at [%1$tH:%1$tM]"          <time>        (gTabletBattery, restore_on_startup, DashboardIPad) ["Status","Timestamp"]
 DateTime TabletBattery_UnreadableSince "Battery unreadable since [%1$td.%1$tm %1$tH:%1$tM]" <time> (gTabletBattery, restore_on_startup, DashboardIPad) ["Status","Timestamp"]
+Number:Temperature       TabletBattery_Temperature "Battery temperature [%.1f °C]"  <temperature> (gTabletBattery, persist_on_change, DashboardIPad) ["Measurement","Temperature"] { unit="°C" }
+Number:ElectricPotential TabletBattery_Voltage     "Battery voltage [%.2f V]"       <energy>      (gTabletBattery, persist_on_change, DashboardIPad) ["Measurement","Voltage"] { unit="V" }
+Number:ElectricCurrent   TabletBattery_Current     "Battery current [%d mA]"        <energy>      (gTabletBattery, persist_on_change, DashboardIPad) ["Measurement","Current"] { unit="mA" }
+Number:Power             TabletBattery_Power       "Battery power [%.2f W]"         <energy>      (gTabletBattery, persist_on_change, DashboardIPad) ["Measurement","Power"] { unit="W" }
 
 // --- control (defaults set by the startup rule when NULL) ---
 Switch TabletBattery_Enabled         "Charge control"                   <switch>      (gTabletBattery, restore_on_startup, DashboardIPad) ["Control","Enabled"]

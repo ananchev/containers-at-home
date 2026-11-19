@@ -289,6 +289,8 @@
 
   // ------------------------------------------------------------------ weather (Open-Meteo), shared by the landing page and page.html#weather
   var LOCATION = { lat: 52.08, lon: 5.06 };        // rounded (~1 km): only used for the forecast
+  // open-meteo via the NPM proxy host meteo.iot on pi5 (the iPad has no internet; tablet-dashboard.md)
+  var METEO = 'http://meteo.iot';
   var WX_TEXT = { 0: 'Clear', 1: 'Mostly clear', 2: 'Partly cloudy', 3: 'Overcast', 45: 'Fog', 48: 'Rime fog',
     51: 'Light drizzle', 53: 'Drizzle', 55: 'Heavy drizzle', 56: 'Freezing drizzle', 57: 'Freezing drizzle',
     61: 'Light rain', 63: 'Rain', 65: 'Heavy rain', 66: 'Freezing rain', 67: 'Freezing rain',
@@ -397,7 +399,7 @@
   function link(href) { var i = href.indexOf('#'); return (i < 0 ? href : href.slice(0, i)) + '?v=' + PAGES_V + (i < 0 ? '' : href.slice(i)); }
 
   window.OH = {
-    link: link, LOCATION: LOCATION, WX_TEXT: WX_TEXT, wxIcon: wxIcon, compass: compass, bins: bins, events: events, dayDiff: dayDiff,
+    link: link, LOCATION: LOCATION, METEO: METEO, WX_TEXT: WX_TEXT, wxIcon: wxIcon, compass: compass, bins: bins, events: events, dayDiff: dayDiff,
     Q: Q, demo: demo, CAMERAS: CAMERAS, APPLIANCES: APPLIANCES, camLoop: camLoop,
     S: S, $: $, pad: pad, hm: hm, st: st, has: has, num: num, esc: esc, icon: icon, fmt: fmt, ago: ago,
     parseLocal: parseLocal, getJSON: getJSON, command: command, rerender: rerender, start: start,

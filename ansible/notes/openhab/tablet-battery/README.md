@@ -18,6 +18,10 @@ ssh -F /openhab/userdata/ssh/config dashboard-ipad \
 ```
 
 * `CurrentCapacity` = battery %, `IsCharging`, `ExternalConnected` = the iPad sees power from the charger.
+* Extras for the wear/drain review (items `TabletBattery_Temperature/Voltage/Current/Power`):
+  `Temperature` (1/100 °C), `Voltage` (mV), `InstantAmperage` (mA, printed as unsigned 64-bit: decode as
+  signed, negative = draining; -491 mA ≈ -1.96 W with the screen on). `CycleCount` and the capacity keys are
+  not read: the battery is an aftermarket replacement and its gauge reports 1 cycle / 100 % health.
 * openHAB side, all from `applications/openhab.yml`:
   * `openssh-client` is installed by `cont-init.d/10-openssh-client.sh` (mounted at `/etc/cont-init.d`)
     when the container is created; the image has no ssh.
