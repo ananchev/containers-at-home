@@ -1,0 +1,30 @@
+// Wall tablet (iPad Air 1) battery control, logic in automation/js/tabletBattery.js.
+// Docs: notes/openhab/tablet-battery/README.md
+
+Group gTabletBattery "Tablet battery control"
+
+// --- the plug (things/tabletPlug.things) ---
+Switch                   TabletPlug_State       "Tablet plug"                          <poweroutlet> (gTabletBattery, persist_on_change)                       { channel="mqtt:topic:tabletPlug:state" }
+Number:Power             TabletPlug_Power       "Tablet plug power [%.0f W]"           <energy>      (gTabletBattery, persist_on_change, persist_every_minute) { channel="mqtt:topic:tabletPlug:power", unit="W" }
+Number:ElectricCurrent   TabletPlug_Current     "Tablet plug current [%.2f A]"         <energy>      (gTabletBattery)                                          { channel="mqtt:topic:tabletPlug:current", unit="A" }
+Number:ElectricPotential TabletPlug_Voltage     "Tablet plug voltage [%.0f V]"         <energy>      (gTabletBattery)                                          { channel="mqtt:topic:tabletPlug:voltage", unit="V" }
+Number:Energy            TabletPlug_Energy      "Tablet plug energy [%.2f kWh]"        <energy>      (gTabletBattery)                                          { channel="mqtt:topic:tabletPlug:energy", unit="kWh" }
+Number                   TabletPlug_LinkQuality "Tablet plug link quality [%d]"        <network>     (gTabletBattery)                                          { channel="mqtt:topic:tabletPlug:linkquality" }
+String                   TabletPlug_Online      "Tablet plug availability [%s]"        <network>     (gTabletBattery)                                          { channel="mqtt:topic:tabletPlug:availability" }
+
+// --- read from the iPad (ioreg over ssh, every minute) ---
+Number   TabletBattery_Level           "iPad battery [%d %%]"                     <battery>     (gTabletBattery, restore_on_startup, persist_on_change)
+Switch   TabletBattery_Charging        "iPad charging"                            <energy>      (gTabletBattery, persist_on_change)
+Switch   TabletBattery_Connected       "iPad sees the charger"                    <poweroutlet> (gTabletBattery, persist_on_change)
+Switch   TabletBattery_Reachable       "iPad battery readable"                    <network>     (gTabletBattery, restore_on_startup, persist_on_change)
+DateTime TabletBattery_LastRead        "iPad battery read [%1$tH:%1$tM]"          <time>        (gTabletBattery, restore_on_startup)
+DateTime TabletBattery_UnreadableSince "iPad battery unreadable since [%1$td.%1$tm %1$tH:%1$tM]" <time> (gTabletBattery, restore_on_startup)
+
+// --- control (defaults set by the startup rule when NULL) ---
+Switch   TabletBattery_Enabled         "Charge control enabled"                   <switch>      (gTabletBattery, restore_on_startup)
+Switch   TabletBattery_Notify          "Telegram on every plug decision"          <switch>      (gTabletBattery, restore_on_startup)
+Number   TabletBattery_Low             "Switch ON at [%d %%]"                     <battery>     (gTabletBattery, restore_on_startup)
+Number   TabletBattery_High            "Switch OFF at [%d %%]"                    <battery>     (gTabletBattery, restore_on_startup)
+Switch   TabletBattery_Desired         "Plug wanted"                              <switch>      (gTabletBattery, restore_on_startup, persist_on_change)
+String   TabletBattery_Reason          "Last decision [%s]"                       <text>        (gTabletBattery, restore_on_startup)
+String   TabletBattery_Alert           "Tablet alert [%s]"                        <error>       (gTabletBattery, restore_on_startup)

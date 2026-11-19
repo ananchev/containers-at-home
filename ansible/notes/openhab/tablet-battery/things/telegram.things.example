@@ -1,0 +1,2 @@
+// Copy to conf/things/telegram.things on pi5 (by hand). Holds the token: never commit the real file.
+Thing telegram:telegramBot:home "Telegram bot" [ chatIds="<chat id>", botToken="<bot token>", parseMode="" ]

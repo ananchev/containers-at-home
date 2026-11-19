@@ -1,0 +1,14 @@
+// Tablet smart plug: Elivco LSPA9 (Tuya TS011F_plug_1), zigbee2mqtt friendly name smart_plug.
+// z2m runs `output: attribute`, so every value has its own topic with a plain payload.
+// Replaces the UI Thing mqtt:topic:c60e6d09:TuyaSmartPlug (State only) from its outdoor-lights days.
+// Used by automation/js/tabletBattery.js. Docs: notes/openhab/tablet-battery/README.md
+Thing mqtt:topic:tabletPlug "Tablet smart plug (LSPA9)" (mqtt:broker:c60e6d09) {
+    Channels:
+        Type switch : state        "State"        [ stateTopic="zigbee2mqtt/smart_plug/state", commandTopic="zigbee2mqtt/smart_plug/set", formatBeforePublish="{\"state\":\"%s\"}" ]
+        Type number : power        "Power"        [ stateTopic="zigbee2mqtt/smart_plug/power", unit="W" ]
+        Type number : current      "Current"      [ stateTopic="zigbee2mqtt/smart_plug/current", unit="A" ]
+        Type number : voltage      "Voltage"      [ stateTopic="zigbee2mqtt/smart_plug/voltage", unit="V" ]
+        Type number : energy       "Energy"       [ stateTopic="zigbee2mqtt/smart_plug/energy", unit="kWh" ]
+        Type number : linkquality  "Link quality" [ stateTopic="zigbee2mqtt/smart_plug/linkquality" ]
+        Type string : availability "Availability" [ stateTopic="zigbee2mqtt/smart_plug/availability", transformationPattern="JSONPATH:$.state" ]
+}

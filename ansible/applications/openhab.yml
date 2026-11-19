@@ -50,6 +50,68 @@
           - (local_backup_folder + '/backup.tar.gz') is file
           - not openhab_version_file.stat.exists
 
+      # Wall tablet battery (notes/openhab/tablet-battery/README.md): automation/js/tabletBattery.js
+      # reads the iPad battery over ssh. The image has no ssh client, so a continuation script
+      # installs it when the container is created. The entrypoint SOURCES it under `set -eux`:
+      # it must never fail or exit, or openHAB does not start.
+      - name: Create the cont-init.d directory
+        ansible.builtin.file:
+          path: "{{ host_directory }}/cont-init.d"
+          state: directory
+          mode: '0755'
+
+      - name: Continuation script that installs openssh-client
+        ansible.builtin.copy:
+          dest: "{{ host_directory }}/cont-init.d/10-openssh-client.sh"
+          mode: '0644'
+          content: |
+            # Sourced by the openHAB entrypoint (set -eux): never fail, never exit.
+            if ! command -v ssh >/dev/null 2>&1; then
+              { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends openssh-client && rm -rf /var/lib/apt/lists/*; } \
+                || echo "cont-init: openssh-client install failed; tablet battery reads fail until the next container start"
+            fi
+
+      # dashboard_ipad.ip / .ssh_private_key are in the vault. userdata/ssh is in the nightly
+      # openHAB backup, so the key is too.
+      - name: Create the ssh directory in userdata
+        ansible.builtin.file:
+          path: "{{ host_directory }}/userdata/ssh"
+          state: directory
+          owner: "1001"
+          group: "1001"
+          mode: '0700'
+
+      - name: Dashboard iPad ssh key
+        ansible.builtin.copy:
+          dest: "{{ host_directory }}/userdata/ssh/dashboard_ipad"
+          content: "{{ dashboard_ipad.ssh_private_key | trim }}\n"
+          owner: "1001"
+          group: "1001"
+          mode: '0600'
+        no_log: true
+
+      - name: ssh client config for the dashboard iPad
+        ansible.builtin.copy:
+          dest: "{{ host_directory }}/userdata/ssh/config"
+          owner: "1001"
+          group: "1001"
+          mode: '0600'
+          content: |
+            # Managed by ansible (applications/openhab.yml). Used by automation/js/tabletBattery.js.
+            Host dashboard-ipad
+                HostName {{ dashboard_ipad.ip }}
+                User root
+                IdentityFile /openhab/userdata/ssh/dashboard_ipad
+                IdentitiesOnly yes
+                # first connection pins the host key, later changes are refused
+                UserKnownHostsFile /openhab/userdata/ssh/known_hosts
+                StrictHostKeyChecking accept-new
+                BatchMode yes
+                ConnectTimeout 5
+                ServerAliveInterval 5
+                ServerAliveCountMax 1
+                LogLevel ERROR
+
       # The Karaf console (8101) is not published: it is reachable from the host with
       # `docker exec -it openhab /openhab/runtime/bin/client -u openhab -p <pass>`.
       - name: Run the container
@@ -64,6 +126,7 @@
             - "{{ host_directory }}/addons:/openhab/addons:Z"
             - "{{ host_directory }}/conf:/openhab/conf:Z"
             - "{{ host_directory }}/userdata:/openhab/userdata:Z"
+            - "{{ host_directory }}/cont-init.d:/etc/cont-init.d:ro,Z"
           # no /etc/localtime bind: the 5.x image warns against it and uses TZ instead
           keep_volumes: yes
           # a clean shutdown takes ~30s; the 10s default ends in SIGKILL, which can
