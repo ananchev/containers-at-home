@@ -179,6 +179,9 @@ binding; the garbage dates are restored from mapdb and refreshed by afvalwijzer 
 
 ## Related devices
 
+* Wall tablet dashboard (iPad, `/static/tablet/`) and its charging plug: see
+  `openhab/tablet-dashboard.md` and `openhab/smart-plug-lspa9.md`.
+
 * Energy meters, price and cost: see `energy-monitoring/README.md` (things, items, `energy.rules`,
   persistence, the `energy-tariff` container). The garden soil sensor's Modbus thing is
   disabled while the sensor is broken, because its timeouts block the shared RS485 bus.

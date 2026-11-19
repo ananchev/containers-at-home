@@ -100,13 +100,12 @@
             "type": "influxdb",
             "uid": "TSXICM2Gk"
           },
-          "query": "SELECT last(\"value\") FROM \"energy_tariff_eur_kwh\" WHERE $timeFilter",
+          "query": "SELECT last(\"value\") FROM \"energy_tariff_eur_kwh\" WHERE time > now() - 30d",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
         }
       ],
-      "timeFrom": "30d",
       "title": "Electricity price",
       "type": "stat"
     },
@@ -325,7 +324,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Oven + master bed & bath"
+                "value": "Oven + bedroom"
               },
               {
                 "id": "color",
@@ -344,7 +343,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Ground floor + shed, WC"
+                "value": "Living & kitchen"
               },
               {
                 "id": "color",
@@ -363,7 +362,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Corridor, small bedroom, attic"
+                "value": "Lu + office"
               },
               {
                 "id": "color",
@@ -401,7 +400,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Hob"
+                "value": "Hob right"
               },
               {
                 "id": "color",
@@ -420,7 +419,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Kitchen 2nd group"
+                "value": "Hob left"
               },
               {
                 "id": "color",
@@ -498,7 +497,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Oven + master bed & bath"
+                "value": "Oven + bedroom"
               },
               {
                 "id": "color",
@@ -517,7 +516,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Ground floor + shed, WC"
+                "value": "Living & kitchen"
               },
               {
                 "id": "color",
@@ -536,7 +535,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Corridor, small bedroom, attic"
+                "value": "Lu + office"
               },
               {
                 "id": "color",
@@ -574,7 +573,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Hob"
+                "value": "Hob right"
               },
               {
                 "id": "color",
@@ -593,7 +592,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Kitchen 2nd group"
+                "value": "Hob left"
               },
               {
                 "id": "color",
@@ -631,13 +630,12 @@
             "type": "influxdb",
             "uid": "TSXICM2Gk"
           },
-          "query": "SELECT mean(\"value\") FROM \"energy_power_w\" WHERE $timeFilter GROUP BY time($__interval), \"circuit\" fill(null) tz('Europe/Amsterdam')",
+          "query": "SELECT mean(\"value\") FROM \"energy_power_w\" WHERE time > now() - 24h GROUP BY time(5m), \"circuit\" fill(null) tz('Europe/Amsterdam')",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
         }
       ],
-      "timeFrom": "24h",
       "title": "Power, last 24 h (stacked)",
       "type": "timeseries"
     },
@@ -684,7 +682,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Oven + master bed & bath"
+                "value": "Oven + bedroom"
               },
               {
                 "id": "color",
@@ -703,7 +701,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Ground floor + shed, WC"
+                "value": "Living & kitchen"
               },
               {
                 "id": "color",
@@ -722,7 +720,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Corridor, small bedroom, attic"
+                "value": "Lu + office"
               },
               {
                 "id": "color",
@@ -760,7 +758,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Hob"
+                "value": "Hob right"
               },
               {
                 "id": "color",
@@ -779,7 +777,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Kitchen 2nd group"
+                "value": "Hob left"
               },
               {
                 "id": "color",
@@ -859,7 +857,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Oven + master bed & bath"
+                "value": "Oven + bedroom"
               },
               {
                 "id": "color",
@@ -878,7 +876,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Ground floor + shed, WC"
+                "value": "Living & kitchen"
               },
               {
                 "id": "color",
@@ -897,7 +895,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Corridor, small bedroom, attic"
+                "value": "Lu + office"
               },
               {
                 "id": "color",
@@ -935,7 +933,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Hob"
+                "value": "Hob right"
               },
               {
                 "id": "color",
@@ -954,7 +952,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Kitchen 2nd group"
+                "value": "Hob left"
               },
               {
                 "id": "color",
@@ -1035,7 +1033,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Oven + master bed & bath"
+                "value": "Oven + bedroom"
               },
               {
                 "id": "color",
@@ -1054,7 +1052,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Ground floor + shed, WC"
+                "value": "Living & kitchen"
               },
               {
                 "id": "color",
@@ -1073,7 +1071,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Corridor, small bedroom, attic"
+                "value": "Lu + office"
               },
               {
                 "id": "color",
@@ -1111,7 +1109,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Hob"
+                "value": "Hob right"
               },
               {
                 "id": "color",
@@ -1130,7 +1128,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Kitchen 2nd group"
+                "value": "Hob left"
               },
               {
                 "id": "color",
@@ -1212,7 +1210,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Oven + master bed & bath"
+                "value": "Oven + bedroom"
               },
               {
                 "id": "color",
@@ -1231,7 +1229,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Ground floor + shed, WC"
+                "value": "Living & kitchen"
               },
               {
                 "id": "color",
@@ -1250,7 +1248,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Corridor, small bedroom, attic"
+                "value": "Lu + office"
               },
               {
                 "id": "color",
@@ -1288,7 +1286,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Hob"
+                "value": "Hob right"
               },
               {
                 "id": "color",
@@ -1307,7 +1305,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Kitchen 2nd group"
+                "value": "Hob left"
               },
               {
                 "id": "color",

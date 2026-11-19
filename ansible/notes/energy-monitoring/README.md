@@ -66,7 +66,7 @@ something like `/dev/tty.usbserial-*`), not to the gateway. They need `pip insta
    it once. Re-run `modbus-identify.py` to confirm.
 4. Put the meter back on the bus, then add it in openHAB (see "Changing the wiring").
 
-Ids in use: 2, 3, 4, 5, 10, 11 (meters) and 101 (soil sensor).
+Ids in use: 2, 3, 4, 5, 10, 11 (meters) and 101 (soil sensor). Id 6 is reserved for the DDS661 on group 6.
 
 ## Meters and circuits
 
@@ -74,16 +74,37 @@ A **meter** is a physical device; a **circuit** is what it measures. They are li
 one place: the item metadata in openHAB (see "Data in InfluxDB"). If wiring changes, only that
 mapping changes, and the history stays correct (see "Changing the wiring").
 
-| Modbus id | Circuit tag | What it measures |
-|---|---|---|
-| 10 | `kitchen_hob` | Induction hob (group 1). Verified with a load test. |
-| 11 | `kitchen_2` | Second kitchen group. Very low use; probably the hob's second group. Not verified yet. |
-| 2 | `ground_floor` | Ground-floor and shed outlets, WC |
-| 3 | `oven_master_bed` | Oven + master bedroom & bathroom. The oven was verified with a load test. |
-| 4 | `laundry` | Washing machine & dryer |
-| 5 | `upstairs` | Corridor, small bedroom, attic |
+The house has a single-phase connection. The panel has six groups (fuses, numbered left to right);
+the inherited group chart next to the panel agrees with the table below. Load-tested 2026-11-16
+(each hob zone and the oven switched on one at a time while watching the meters).
 
-The dakkapel group has **no meter**. See "What is not measured".
+| Fuse | Modbus id | Circuit tag | What it measures |
+|---|---|---|---|
+| 1 right | 10 | `kitchen_hob` | Hob, **right** zones (front + back). Verified. |
+| 1 left | 11 | `kitchen_2` | Hob, **left** zones (front + back). Verified. |
+| 2 | 2 | `ground_floor` | Living room, kitchen outlets, shed (berging), hall & WC |
+| 3 | 3 | `oven_master_bed` | Oven (verified, about 2.2 kW), kitchen outlets, bergkast, master bedroom, bathroom |
+| 4 | 4 | `laundry` | Washing machine & dryer |
+| 5 | 5 | `upstairs` | Landing, Lu's room (bedroom 2, first floor), attic office (formerly bedroom 3), MV unit (mechanical ventilation, a constant base load; left out of the short name) |
+| 6 | — | — | Dakkapel room (attic floor, next to the office). **No meter yet**; see below. |
+
+Group 1 is the two-pole *fornuisgroep* (stove group): two B16 fuses tied together, one per hob
+side. The circuit tags were kept when the labels changed, so the history continues; the labels and
+Grafana display names say "Hob right" (10) and "Hob left" (11).
+
+**Planned (when the DDS661 arrives, all in one go):**
+
+* A DDS661 for group 6 (dakkapel), Modbus id **6**, single module, next to fuse 6. The bell
+  transformer sits there now and must move.
+* Take the oven off group 3. The hob goes onto the right half of group 1 alone (B16, hob set to
+  its single-phase connection with its power limit at 16 A / about 3.7 kW). The left half's
+  conductors, already run to the kitchen, then feed a new oven outlet. Before doing it, check that
+  each half has **its own neutral** all the way to the hob's connection box. On a single-phase
+  connection a shared perilex neutral would carry both groups (up to 32 A). Don't put a bigger fuse
+  on the 2.5 mm² cable.
+* Afterwards meter 10 = hob, meter 11 = oven, meter 3 = bedroom/bath only. Redo the load test,
+  then change the labels, and add new circuit tags (for example `hob`, `oven`, `master_bed`) so
+  the old and new meanings stay separate in the history.
 
 > The old app and dashboards called meters 10 and 11 "line0" and "line1", and meters 2–5
 > "line2–line5".
@@ -176,8 +197,8 @@ Ways to get a real house total, best first:
    live whole-house power every second, and the remainder becomes a live value too.
 2. **Allow remote smart-meter reading for the supplier** (if the meter supports it). Hourly data
    then shows up in `house_energy` automatically, and the backfill starts by itself.
-3. **Give the dakkapel group a meter** (move or add one). Check first with an electrician that
-   any groups sharing a single-phase meter are on the same phase and within its rated current.
+3. **Give the dakkapel group a meter.** Chosen: a DDS661 is on order (see "Meters and circuits").
+   This covers group 6, but still doesn't give the house total.
 
 ## Data in InfluxDB
 
@@ -258,7 +279,7 @@ In this folder:
 |---|---|
 | `openhab/` | Reference copies of `energyMeters.things`, `energyMeters.items`, `energy.rules` (taken 2026-11-14) |
 | `energy-dashboard.json` | Reference export of the Grafana dashboard |
-| `meter-tools/` | `modbus-identify.py`, `change-id.py` (see "Setting a meter's Modbus id") |
+| `meter-tools/` | `modbus-identify.py`, `change-id.py` (see "Setting a meter's Modbus id"); `oven_estimate.py`, a one-off, read-only estimate of the oven's share of meter 3, now and for the old app's 2023–24 hourly history (see its docstring) |
 | `datasheets/` | DDS238-2 and DDS661 meter and USR-DR302 gateway manuals |
 
 The reference copies are not deployed. The live files on pi5 are the source of truth: after changing
