@@ -170,6 +170,19 @@ Rounds 6-8:
   is still NULL.
 * Icons: MDI has no range hood; the hood uses `iconify:material-symbols:range-hood-outline`.
 
+Attic bedroom (2026-11-20):
+* The room under the dakkapel, next to the attic office. Location `AtticBedroom` (tag
+  `Bedroom`, part of `Attic`) and its lights are file-based: `conf/things/atticBedroom.things`
+  and `conf/items/atticBedroom.items`.
+* Light: a Hoftronic HD300W-ZB dimmer, z2m `attic_bedroom_lights_dimmer`, read and controlled
+  through the items `AtticBedroomLights_Power` and `_Brightness` (z2m brightness 1..254, the
+  same as the kitchen countertop). `lights.rules` includes it in the after-startup `/get`.
+* Pages: an Overview Lights card (blue, the room colour), the popup `light_attic_bedroom`, and
+  a card on the Lights tab. Tablet: an area on the Lights page (`c-atticbed`). Five areas switch
+  that page to the compact layout.
+* Not yet: a climate card (there is no sensor or Evohome zone) and energy (fuse group 6 is
+  unmetered until the DDS661 is fitted as Modbus id 6).
+
 Round 4: Climate tab = heating mode buttons + per room a setpoint stepper and "Back to schedule";
 the Overview Climate row starts with a Heating tile (tap to change the mode) and shows the
 setpoint and overrides per room.

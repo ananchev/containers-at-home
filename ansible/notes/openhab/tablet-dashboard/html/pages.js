@@ -215,6 +215,8 @@
     { name: 'Bedroom', dot: 'c-bedroom', lights: [
       { name: 'Main lights', power: 'BedroomMainLights_Power', bright: 'BedroomMainLights_Brightness', ct: 'BedroomMainLights_ColorTemperature' },
       { name: 'Night light', power: 'BedroomNightLight_Power', bright: 'BedroomNightLight_Brightness', ct: 'BedroomNightLight_Color_Temperature' } ] },
+    { name: 'Attic bedroom', dot: 'c-atticbed', lights: [
+      { name: 'Lights', power: 'AtticBedroomLights_Power', bright: 'AtticBedroomLights_Brightness' } ] },
     { name: 'Kitchen', dot: 'c-kitchen', kitchen: true },
     { name: 'Entrance', dot: 'c-entrance', note: function () { return 'Automation: ' + (st('outdoorlightsNextStatusChange') || '--'); }, lights: [
       { name: 'Front door', power: 'EntranceLightsPower', bright: 'EntranceLightsBrightness', ct: 'EntranceLightsColorTemperature' } ] },

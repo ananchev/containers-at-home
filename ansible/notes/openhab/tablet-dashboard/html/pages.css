@@ -30,7 +30,7 @@
 .card-h .aside { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 14px; }
 .card-f { font-size: 13px; color: var(--dim); line-height: 1.4; margin: 8px 0 4px; }
 /* room colours, as in the Main UI */
-.c-living { background: #58c487; } .c-bedroom { background: #a68cf0; } .c-lu { background: #ef7fb4; } .c-attic { background: #7d63d8; }
+.c-living { background: #58c487; } .c-bedroom { background: #a68cf0; } .c-lu { background: #ef7fb4; } .c-attic { background: #7d63d8; } .c-atticbed { background: #5b8def; }
 .c-bath { background: #6cc4f0; } .c-kitchen { background: #b8d65a; } .c-outside { background: #3fbfb0; } .c-entrance { background: #f1b44c; }
 
 /* ---------- rows ---------- */
