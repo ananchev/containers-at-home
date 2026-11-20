@@ -182,6 +182,13 @@ Attic bedroom (2026-11-20):
   that page to the compact layout.
 * Not yet: a climate card (there is no sensor or Evohome zone) and energy (fuse group 6 is
   unmetered until the DDS661 is fitted as Modbus id 6).
+* 2026-11-20 fix: pairing left the dimmer with no binds and no configured reporting, so turning it
+  on/off/dimming at the wall never reached openHAB (items only changed optimistically on their own
+  commands). Fixed live in z2m (stored in database.db, survives restarts; redo after a re-pair):
+  `bridge/request/device/bind` `{"from":"attic_bedroom_lights_dimmer","from_endpoint":1,"to":"Coordinator","clusters":["genOnOff","genLevelCtrl"]}`,
+  then `bridge/request/device/configure_reporting` for `genOnOff/onOff` (min 0, max 3600, change 0)
+  and `genLevelCtrl/currentLevel` (min 1, max 3600, change 1), both endpoint 1. Check a new z2m
+  device with `binds`/`configuredReportings` in database.db: empty means it won't report local changes.
 
 Round 4: Climate tab = heating mode buttons + per room a setpoint stepper and "Back to schedule";
 the Overview Climate row starts with a Heating tile (tap to change the mode) and shows the
