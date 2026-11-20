@@ -109,12 +109,24 @@
   }
 
   // ------------------------------------------------------------------ version.txt: reload open pages after a deploy
+  // Reload only when this page and the REST API both answer. A reload while openHAB is (re)starting
+  // lands on Safari's "not accessible" page, which has no script and never retries. Until then the
+  // current page stays and the next version poll (or the nightly minute tick) tries again.
+  var reloading = false;
+  function safeReload() {
+    if (reloading) return;
+    reloading = true;
+    var bust = 'probe=' + Date.now();
+    Promise.all([fetch(location.pathname + '?' + bust, { cache: 'no-store' }), fetch('/rest/items/Tablet_NightMode/state?' + bust, { cache: 'no-store' })])
+      .then(function (rs) { if (rs[0].ok && rs[1].ok) location.reload(); else reloading = false; })
+      .catch(function () { reloading = false; });
+  }
   var version = null;
   function checkVersion() {
     fetch('version.txt?t=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : null; }).then(function (v) {
       if (v === null) return;
       v = v.trim();
-      if (version === null) version = v; else if (v !== version) location.reload();
+      if (version === null) version = v; else if (v !== version) safeReload();
     }).catch(function () {});
   }
 
@@ -229,7 +241,9 @@
     }, 15000);
     setInterval(rerender, 60000);       // "x min ago" texts, time-based expiry
     // a fresh page every night (memory leaks on a 1 GB iPad)
-    setInterval(function () { var d = new Date(); if (d.getHours() === 4 && d.getMinutes() === 0) location.reload(); }, 60000);
+    // (due from 04:00; retried every minute until openHAB answers)
+    var nightlyDue = false;
+    setInterval(function () { var d = new Date(); if (d.getHours() === 4 && d.getMinutes() === 0) nightlyDue = true; if (nightlyDue) safeReload(); }, 60000);
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) return;
       fit();
@@ -395,7 +409,7 @@
   // openHAB /static sends Cache-Control max-age=1 year, so a plain link to page.html / index.html
   // can open a stale copy that loads old scripts (2026-11-17: the new weather page bounced back
   // home). Links between the pages carry this version: bump it on every deploy that changes them.
-  var PAGES_V = '17';
+  var PAGES_V = '38';
   function link(href) { var i = href.indexOf('#'); return (i < 0 ? href : href.slice(0, i)) + '?v=' + PAGES_V + (i < 0 ? '' : href.slice(i)); }
 
   window.OH = {

@@ -190,6 +190,94 @@ Attic bedroom (2026-11-20):
   and `genLevelCtrl/currentLevel` (min 1, max 3600, change 1), both endpoint 1. Check a new z2m
   device with `binds`/`configuredReportings` in database.db: empty means it won't report local changes.
 
+Hue on API v2 (2026-11-20):
+* All Hue Things are file-based on the CLIP v2 bridge `hue:bridge-api2:home` (`conf/things/hueBridge.things`,
+  holds the application key = the v1 bridge's user name). The bridge pushes events: no polling.
+  Rooms and zones report the real aggregate (on if any bulb is on, average brightness), so a
+  room follows its zones and vice versa. In v1 a group showed the last command sent to that group.
+* v2 rooms/zones have only switch, brightness and scene (by NAME, not id). Colour and colour
+  temperature exist per bulb only: an item links to each bulb's channel (one item, several links)
+  or is a `Group:Dimmer:AVG` / `Group:Color:EQUALITY` over bulb items.
+* v2 DEVICES (bulbs) expose only their richest channel: a colour bulb has `color` (+ CT) but no
+  `switch`/`brightness`, a dimmable/white bulb has `brightness` but no `switch`. Link Switch and
+  Dimmer items to that channel (state converts, ON/OFF/% commands work); `openhab:things show`
+  lists the real channels. A link to a missing channel fails silently: the command shows
+  "predicted to become OFF" in events.log. Fixed 11-20: garden ball (gardenBall.items) and Hue Go
+  (HueGoSwitch/HueGoBrightness) → `color`; BedroomNightLight_Power and HueChristmas_Power →
+  `brightness` (console relinks). Rooms and zones do have `switch`.
+* `conf/things/hue.things`: Bedroom room (scenes), Bedroom main lights zone + L/R bulbs (CT),
+  night light bulb (LWB010: dimmable only, so `BedroomNightLight_Color_Temperature` is unlinked),
+  Veranda zone + L/R bulbs (CT), Hue Christmas and Hue Go devices. The 16 UI-managed items were
+  relinked with the console (`openhab:links unlink|link <item> <channel>`, no restart); link
+  backup `userdata/jsondb/org.openhab.core.thing.link.ItemChannelLink.json.pre-huev2-20261120`.
+* The v1 bridge `hue:bridge:ecb5fa07ce2d` (UI-managed) is DISABLED and kept for rollback
+  (enable it and relink). `system.rules` watches `hue:bridge-api2:home`. The sitemap Bedroom scene
+  Selection takes its options from the channel (the v1 id mappings are gone).
+* Garden ball light (Tuya TS0505B on the bridge): `hue:device:home:gardenball`, items in
+  `conf/items/gardenBall.items` (`GardenBallLight_Power/_Brightness/_Color/_ColorTemperature`,
+  location Garden). Main UI: a row in the Overview Outside card, popup `light_garden_ball`, Garden
+  card on the Lights tab. Tablet: "Ball light" in the Garden area (swatches + warmth).
+* Not added: the TV lightstrips. They run Hue Sync from a sideloaded app on the LG TV; an
+  openHAB command would fight that app. CLIP v2 ids: `GET
+  https://<bridge>/clip/v2/resource/{room,zone,device}` with header `hue-application-key`.
+
+Lu's room lights (2026-11-20):
+* Hue room "Dru's Room": 2 colour bulbs (LCE002, zone "Dru color lamps") and 3 ambiance bulbs
+  (LTE002, zone "Dru ambient lights", shown as "White lamps"), plus a Hue dimmer switch RWL022.
+  The switch acts through Hue bridge rules; openHAB only reads it (battery, last press/button).
+  The location is the UI-managed `DruRoom`.
+* `conf/things/lusRoom.things` + `conf/items/lusRoom.items`: `LusRoomLights_Power/_Brightness/_Scene`
+  (room; Dutch scene names from the Hue app), `LusRoomLights_ColorTemperature` (AVG group over all 5
+  bulbs), `LusRoomColourLamps_Power/_Brightness` (zone) + `_Color` (EQUALITY group over the 2 bulbs),
+  `LusRoomAmbiance_Power/_Brightness` (zone) + `_ColorTemperature` (AVG group over the 3 bulbs),
+  `LusRoomSwitch_Battery/_BatteryLow/_LastUpdated/_LastEvent`.
+* Batteries: `System_Batteries` (in `gSystemStatus`, row on the System page) reports "Lu's switch
+  N %" when Hue says low or the level is below 10 % (15 % and "low" on 2026-11-20). It is
+  maintenance, not a fault: `System_Issues_Count` leaves it out, the Overview System tile turns
+  orange "Battery low" instead of red, and the tablet shows an amber "Replace battery" chip
+  instead of the red "system issue" one.
+* Pages: an Overview Lights card (pink, after Bedroom), the popup `light_lus_room`, a card on
+  the Lights tab, a "Lu's room" frame in `lights.sitemap`. Pages backup:
+  `uicomponents_ui_page.json.pre-lu-20261120`. Tablet: area `c-lu` with rows by bulb type: All
+  lights (brightness + scene buttons Bright/Read/Relax/Dimmed/Night light), Colour lamps (2)
+  (brightness + 8 colour swatches that keep the current brightness) and White lamps (3)
+  (brightness + warmth). Six areas give a 2x3 grid. A light in `AREAS` can carry
+  `scenes: { item, list: [[label, v2 scene name]] }` and `colours: '<Color item>'`; popup titles
+  are "Room · light". Redone the same evening: the user found three toggles, each with its own
+  popup, counter-intuitive. Lu's room is now ONE "Lights" row (room switch). Its `status:` shows
+  the active scene / brightness / Off. The popup has Brightness, then sections Scene, Colour lamps
+  (swatches) and White lamps (Warmth), via `parts: [{ name, power, colours | ct }]`. The lamp
+  groups have no separate on/off any more.
+* Main UI widget gotchas (found 2026-11-20 on the garden ball):
+  - A brightness `oh-slider-item` with `min: 1` bounces a light back ON: when OFF drops the
+    state to 0 the slider clamps to 1 and SENDS it as a command. All brightness sliders use
+    `min: 0` (backup `.pre-slidermin-20261120`).
+  - `oh-colorpicker-item` always draws an extra toggle (hardcoded, no option). Colour rows are
+    now `oh-list-item` with `slots.after: [oh-colorpicker]` (backup `.pre-colourrow-20261120`),
+    hidden while the light is off: at 0 % brightness the HSB swatch is black, though hue and
+    saturation are kept.
+  - Slider rows show the item's formatted state on the right; `label: false` drops the extra
+    bubble that printed raw v2 decimals (1.190). A Hue colour bulb reports colour temperature
+    UNDEF while in colour mode (not a persistence issue; the slider has no knob). A "tap for
+    white" row was tried and found unintuitive, so the garden ball has NO colour temperature at
+    all (item, popup rows and tablet `ct` removed 11-20; backup `.pre-noct-20261120`).
+  - v2 brightness comes with decimals (7.110), so `%d %%` shows it raw. File items now use
+    `%.0f %%`; the UI-made Bedroom main/night and Veranda brightness items got stateDescription
+    metadata `%.0f %%` (jsondb Metadata.json, backup `.pre-pattern-20261120`).
+* Main UI light popups (tidied 2026-11-20, backup `uicomponents_ui_page.json.pre-tidy-20261120`):
+  titles "Room · light"; the Hue colour temperature runs cold → warm (openHAB 0 = cold), the
+  miio front-door lights warm → cold; scenes show "none active" when v2 reports UNDEF; the
+  night-light popup has no colour temperature. `light_lus_room` has sections All lights /
+  Colour lamps (2) / White lamps (3) / Wall switch (battery, last pressed), like the Lights tab card.
+* Entrance "Automation: NULL": `outdoorlightsNextStatusChange` was written only by the
+  sunrise/dusk rules in `lights.rules` (live on pi5, not in the repo) and is not persisted, so
+  every restart blanked it until the next event. Since 2026-11-20 the rule "outdoor lights: next
+  automation time after startup" (`System reached start level 100`) works it out from the astro
+  actions (backup `lights.rules.bak-20261120-auto`).
+* Tablet sliders: the track is painted on the `<input>` itself (`background-image` set by
+  `paint()`): Safari 12 does not resolve CSS variables inside `::-webkit-slider-runnable-track`,
+  so the old `var(--fill)` track was invisible on the iPad.
+
 Round 4: Climate tab = heating mode buttons + per room a setpoint stepper and "Back to schedule";
 the Overview Climate row starts with a Heating tile (tap to change the mode) and shows the
 setpoint and overrides per room.

@@ -35,14 +35,14 @@
 
   // on/off row; tapping toggles the item
   function more(popKey) { return popKey ? '<span class="more" data-act="pop" data-arg="' + popKey + '">' + icon('i-chev') + '</span>' : ''; }
-  function toggle(title, item, ic, popKey) {
+  function toggle(title, item, ic, popKey, status) {
     var id = bind(function (el) {
       var on = st(item) === 'ON';
       cls(el, 'row' + (on ? ' on' : '') + (has(item) ? '' : ' na'));
-      setText(el.querySelector('.rv'), has(item) ? (on ? 'On' : 'Off') : 'no data');
+      setText(el.querySelector('.rv'), has(item) ? (status ? status() : on ? 'On' : 'Off') : 'no data');
     });
     return '<div class="row" id="' + id + '" data-toggle="' + item + '">' + icon(ic || 'i-bulb') + '<span class="rt">' + esc(title) +
-      '</span><span class="rv"></span>' + more(popKey) + '<span class="sw"><i></i></span></div>';
+      '</span><span class="rv' + (status ? ' stat' : '') + '"></span>' + more(popKey) + '<span class="sw"><i></i></span></div>';
   }
 
   // read-only row; fn returns the value text
@@ -66,9 +66,12 @@
     return '<div class="sl" id="' + id + '"><div class="sl-top"><span>' + esc(title) + '</span><b>--</b></div>' +
       '<input type="range" min="' + min + '" max="' + max + '" step="' + (o.step || 1) + '" data-slider="' + item + '" data-unit="' + (o.unit || '%') + '"></div>';
   }
+  var TRACK = null;
   function paint(r, min, max) {
     var p = ((r.value - min) / (max - min)) * 100;
-    r.style.setProperty('--fill', 'linear-gradient(to right, var(--accent) ' + p + '%, var(--panel-2) ' + p + '%)');
+    // painted on the input itself: Safari 12 does not resolve CSS variables inside ::-webkit-slider-runnable-track
+    if (!TRACK) { var cs = getComputedStyle(document.documentElement); TRACK = [cs.getPropertyValue('--accent').trim() || '#f1b44c', cs.getPropertyValue('--panel-2').trim() || '#1e222a']; }
+    r.style.backgroundImage = 'linear-gradient(to right, ' + TRACK[0] + ' ' + p + '%, ' + TRACK[1] + ' ' + p + '%)';
   }
 
   // segmented buttons: [{label, item, cmd, on: fn, sub: fn|string, cls}] or {label, act, arg, on} for page-local actions
@@ -208,13 +211,24 @@
   } };
 
   // ---------- Lights
-  // Areas left to right. A light: { name, power, bright?, ct?, icon? }; the kitchen is special (scenes).
+  // Areas left to right. A light: { name, power, bright?, ct?, icon?, scenes?, colours? }; the kitchen is special (scenes).
+  // scenes: { item, list: [[label, Hue scene name (API v2 scene channel)], ...] } -> buttons under the sliders.
+  // colours: a Hue Color item -> colour swatches under the sliders.
   // Up to 4 areas: one column each with the sliders inline. 5 and more: compact cards, 3 per row,
   // and a dimmable light opens a popup with its sliders (like the Main UI).
   var AREAS = [
     { name: 'Bedroom', dot: 'c-bedroom', lights: [
       { name: 'Main lights', power: 'BedroomMainLights_Power', bright: 'BedroomMainLights_Brightness', ct: 'BedroomMainLights_ColorTemperature' },
-      { name: 'Night light', power: 'BedroomNightLight_Power', bright: 'BedroomNightLight_Brightness', ct: 'BedroomNightLight_Color_Temperature' } ] },
+      { name: 'Night light', power: 'BedroomNightLight_Power', bright: 'BedroomNightLight_Brightness' } ] },
+    { name: "Lu's room", dot: 'c-lu', lights: [
+      // one row for the room; the popup holds scenes, colour for the colour lamps and warmth for the white lamps
+      { name: 'Lights', power: 'LusRoomLights_Power', bright: 'LusRoomLights_Brightness',
+        status: function () { var sc = st('LusRoomLights_Scene'), hit = this.scenes.list.filter(function (x) { return x[1] === sc; })[0];
+          return st('LusRoomLights_Power') !== 'ON' ? 'Off' : hit ? hit[0] : pct('LusRoomLights_Brightness'); },
+        scenes: { item: 'LusRoomLights_Scene', list: [['Bright', 'Helder'], ['Read', 'Lezen'], ['Relax', 'Ontspannen'],
+          ['Dimmed', 'Gedimd'], ['Night light', 'Nachtlampje']] },
+        parts: [{ name: 'Colour lamps', power: 'LusRoomColourLamps_Power', colours: 'LusRoomColourLamps_Color' },
+                { name: 'White lamps', power: 'LusRoomAmbiance_Power', ct: 'LusRoomAmbiance_ColorTemperature' }] } ] },
     { name: 'Attic bedroom', dot: 'c-atticbed', lights: [
       { name: 'Lights', power: 'AtticBedroomLights_Power', bright: 'AtticBedroomLights_Brightness' } ] },
     { name: 'Kitchen', dot: 'c-kitchen', kitchen: true },
@@ -222,9 +236,8 @@
       { name: 'Front door', power: 'EntranceLightsPower', bright: 'EntranceLightsBrightness', ct: 'EntranceLightsColorTemperature' } ] },
     { name: 'Garden', dot: 'c-outside', lights: [
       { name: 'Veranda', power: 'VerandaMainLights_Power', bright: 'VerandaMainLights_Brightness', ct: 'VerandaMainLights_Color_Temperature' },
+      { name: 'Ball light', power: 'GardenBallLight_Power', bright: 'GardenBallLight_Brightness', colours: 'GardenBallLight_Color' },
       { name: 'Shed', power: 'ShedLight_ShedLightsPower', icon: 'i-home' },
-      { name: 'Christmas', power: 'VerandaChristmasLights_power', icon: 'i-star' },
-      { name: 'Hue Christmas', power: 'HueChristmas_Power', icon: 'i-star' },
       { name: 'Garden socket', power: 'SONOFFPowerSocket_State', icon: 'i-plug' } ] }
   ];
   var kitchenState = function () {
@@ -239,17 +252,55 @@
     };
     return seg([scene('All on', 'FULL'), scene('Dimmed', 'DIM'), scene('Off', 'OFF')]);
   }
-  function lightSliders(l) {
-    return slider('Brightness', l.bright, { power: l.power }) + (l.ct ? slider('Colour temperature', l.ct, { power: l.power }) : '');
+  // [label, hue, saturation, swatch colour]; saturation under 30 counts as white
+  var COLOURS = [['Red', 0, 100, '#ff3b30'], ['Orange', 28, 100, '#ff9500'], ['Yellow', 52, 100, '#ffd60a'], ['Green', 120, 100, '#34c759'],
+    ['Blue', 225, 100, '#3b6cff'], ['Purple', 275, 100, '#a855f7'], ['Pink', 320, 85, '#ff5fb4'], ['Warm white', 35, 25, '#ffe2b8']];
+  // the swatch nearest to the lamps' colour (white below 30 % saturation), or -1
+  function nearestColour(item) {
+    var hsb = (st(item) || '').split(','), h = +hsb[0], sa = +hsb[1], best = -1, bd = 999;
+    if (isNaN(h) || isNaN(sa)) return -1;
+    COLOURS.forEach(function (c, i) {
+      if ((c[2] < 30) !== (sa < 30)) return;
+      var d = Math.abs(h - c[1]); d = Math.min(d, 360 - d);
+      if (d < bd) { bd = d; best = i; }
+    });
+    return best;
   }
+  function swatches(item, power) {
+    return '<div class="seg swatches">' + COLOURS.map(function (c, i) {
+      var id = bind(function (el) {
+        cls(el, 'sb swc' + (st(power) === 'ON' && nearestColour(item) === i ? ' on' : ''));
+      });
+      return '<div class="sb swc" id="' + id + '" data-act="colour" data-item="' + item + '" data-arg="' + c[1] + ',' + c[2] + '" style="background: ' + c[3] + '"></div>';
+    }).join('') + '</div>';
+  }
+  // keep the current brightness; off or very dim comes on at 80 %
+  ACT.colour = function (el) {
+    var item = el.getAttribute('data-item'), b = parseFloat((st(item) || '').split(',')[2]);
+    if (isNaN(b) || b < 30) b = 80;
+    OH.command(item, el.getAttribute('data-arg') + ',' + Math.round(b)).catch(function () {});
+  };
+  function sceneButtons(l) {
+    return seg(l.scenes.list.map(function (sc) {
+      return { label: sc[0], item: l.scenes.item, cmd: sc[1], on: function () { return st(l.power) === 'ON' && st(l.scenes.item) === sc[1]; } };
+    }));
+  }
+  function lightSliders(l) {
+    return slider('Brightness', l.bright, { power: l.power }) + (l.ct ? slider('Colour temperature', l.ct, { power: l.power }) : '') +
+      (l.colours ? swatches(l.colours, l.power) : '') + (l.scenes ? (l.parts ? subHead('Scene') : '') + sceneButtons(l) : '') +
+      (l.parts || []).map(function (q) {
+        return q.colours ? subHead(q.name) + swatches(q.colours, q.power) : subHead(q.name) + slider('Warmth', q.ct, { power: q.power });
+      }).join('');
+  }
+  function subHead(t) { return '<div class="pop-sub">' + esc(t) + '</div>'; }
   PAGES.lights = { title: 'Lights', build: function () {
     var areas = OH.demo(AREAS, OH.Q.areas), compact = areas.length > 4;
     POP = {};
-    function light(l) {
+    function light(l, a) {
       if (!l.bright) return toggle(l.name, l.power, l.icon || 'i-bulb');
-      if (!compact) return toggle(l.name, l.power, 'i-bulb') + lightSliders(l);
-      var k = popKey(l.name, function () { return toggle(l.name, l.power, 'i-bulb') + lightSliders(l); });
-      return toggle(l.name, l.power, 'i-bulb', k);
+      if (!compact) return toggle(l.name, l.power, 'i-bulb', null, l.status ? l.status.bind(l) : null) + lightSliders(l);
+      var k = popKey(a.name + ' \u00b7 ' + l.name, function () { return toggle(l.name, l.power, 'i-bulb') + lightSliders(l); });
+      return toggle(l.name, l.power, 'i-bulb', k, l.status ? l.status.bind(l) : null);
     }
     function area(a) {
       var body;
@@ -260,7 +311,7 @@
         body = label('Now', kitchenState, 'i-bulb', true, k) + kitchenScenes() +
           (compact ? '' : slider('Dimmed brightness', 'Kitchenlightsabovethecountertop_Brightness', { min: 5 }));
       } else {
-        body = a.lights.map(light).join('');
+        body = a.lights.map(function (l) { return light(l, a); }).join('');
       }
       if (a.note) body += '<div class="card-f" id="' + bind(function (el) { setText(el, a.note()); }) + '"></div>';
       return card({ title: a.name, dot: a.dot, body: body,
@@ -299,44 +350,66 @@
     { n: 'Hob right', m: 10 }, { n: 'Hob left', m: 11 }, { n: 'Oven + master bedroom', m: 3 },
     { n: 'Living, kitchen, WC', m: 2 }, { n: 'Washer & dryer', m: 4 }, { n: 'Lu\'s room + attic office', m: 5 }
   ];
-  var period = 'today';
+  var period = 'today', sel = null;   // sel: the circuit the page is filtered to (null = all circuits)
   ACT.period = function (el) { period = el.getAttribute('data-arg'); };
+  // tap a circuit to filter the tiles + chart to it; tap it again (or "All" in the header) to go back.
+  // The Today / This month tiles pick the period of the per-circuit list.
+  ACT.circ = function (el) { var m = +el.getAttribute('data-arg') || null; sel = m === sel ? null : m; drawChart(); };
+  // "Per circuit" tab: picks the first circuit when none is selected, keeps the current one otherwise
+  ACT.circFirst = function () { if (!sel) { sel = CIRCUITS[0].m; drawChart(); } };
+  function selC() { return CIRCUITS.filter(function (c) { return c.m === sel; })[0]; }
+  function eItem(total, suffix) { var c = selC(); return c ? 'EnergyMeter' + c.m + '_' + suffix : total; }
   PAGES.energy = { title: 'Energy', build: function () {
+    sel = null;
     function tile(title, big, sub) {
       var id = bind(function (el) { el.querySelector('.big').innerHTML = big(); setText(el.querySelector('.sub2'), sub()); });
       return card({ cls: 'tile', title: title, body: '<div id="' + id + '"><div class="big"></div><div class="sub2"></div></div>' });
     }
-    var priceStale = function () {
-      var d = OH.parseLocal(st('ElectricityTariffUpdated'));
-      return !d || Date.now() - d.getTime() > 48 * 3600 * 1000;
-    };
+    // Today | This month: one card, two tabs; the active one (thick bar) sets the period of the per-circuit list
+    function half(title, per, key, d) {
+      var id = bind(function (el) {
+        cls(el, 'e-half' + (period === per ? ' on' : ''));
+        var c = selC();
+        el.querySelector('.big').innerHTML = fmt(num(eItem('Energy' + key + '_kWh', key + 'Kwh')), d) + '<small>kWh</small>';
+        setText(el.querySelector('.sub2'), '€ ' + fmt(num(eItem('Energy' + key + '_Cost', key + 'Cost')), 2) + (c ? ' · ' + c.n : ''));
+      });
+      return '<div class="e-half" id="' + id + '" data-act="period" data-arg="' + per + '"><div class="card-h"><span>' + esc(title) + '</span></div>' +
+        '<div class="big"></div><div class="sub2"></div></div>';
+    }
     var circList = bind(function (el) {
       var key = period === 'month' ? 'Month' : 'Today';
       var rows = CIRCUITS.map(function (c) {
-        return { n: c.n, w: num('EnergyMeter' + c.m + '_Power'), k: num('EnergyMeter' + c.m + '_' + key + 'Kwh'), e: num('EnergyMeter' + c.m + '_' + key + 'Cost') };
+        return { n: c.n, m: c.m, w: num('EnergyMeter' + c.m + '_Power'), k: num('EnergyMeter' + c.m + '_' + key + 'Kwh'), e: num('EnergyMeter' + c.m + '_' + key + 'Cost') };
       });
       var max = Math.max.apply(null, rows.map(function (r) { return isNaN(r.k) ? 0 : r.k; }).concat([0.01]));
       el.innerHTML = rows.map(function (r) {
-        return '<div class="circ"><div class="circ-top"><span class="n">' + esc(r.n) + '</span><span class="w">' + watts(r.w) + '</span>' +
+        return '<div class="circ' + (r.m === sel ? ' on' : sel ? ' dim' : '') + '" data-act="circ" data-arg="' + r.m + '">' +
+          '<div class="circ-top"><span class="n">' + esc(r.n) + '</span><span class="w">' + watts(r.w) + '</span>' +
           '<span class="k">' + fmt(r.k, period === 'month' ? 1 : 2) + ' kWh<br><small>€ ' + fmt(r.e, 2) + '</small></span></div>' +
           '<div class="circ-bar"><i style="width:' + (isNaN(r.k) ? 0 : (r.k / max * 100).toFixed(1)) + '%"></i></div></div>';
       }).join('');
     });
-    return '<div class="g g4">' +
-      tile('Power now', function () { var w = num('gEnergyPower'); return isNaN(w) ? '--' : w >= 1000 ? (w / 1000).toFixed(2) + '<small>kW</small>' : Math.round(w) + '<small>W</small>'; },
-        function () { return 'All metered circuits'; }) +
-      tile('Today', function () { return fmt(num('EnergyToday_kWh'), 2) + '<small>kWh</small>'; }, function () { return '€ ' + fmt(num('EnergyToday_Cost'), 2); }) +
-      tile('This month', function () { return fmt(num('EnergyMonth_kWh'), 1) + '<small>kWh</small>'; }, function () { return '€ ' + fmt(num('EnergyMonth_Cost'), 2); }) +
-      tile('Price', function () { var p = num('ElectricityTariff'); return isNaN(p) ? '--' : (p * 100).toFixed(2) + '<small>ct/kWh</small>'; },
-        function () { return priceStale() ? 'STALE: not updated for 48 h' : 'Updated ' + timeOf('ElectricityTariffUpdated'); }) +
+    // header tabs "All | Per circuit": All is active (underlined) while nothing is filtered, Per circuit while a circuit is
+    var tabs = '<div class="card-h e-tabs"><span class="e-all" data-act="circ" data-arg="0" id="' +
+      bind(function (el) { cls(el, 'e-all' + (sel ? '' : ' on')); }) + '">All</span><span class="e-all" data-act="circFirst" id="' +
+      bind(function (el) { cls(el, 'e-all' + (sel ? ' on' : '')); }) + '">Per circuit</span></div>';
+    return '<div class="g e-top">' +
+      tile('Power now', function () { var w = num(eItem('gEnergyPower', 'Power')); return isNaN(w) ? '--' : w >= 1000 ? (w / 1000).toFixed(2) + '<small>kW</small>' : Math.round(w) + '<small>W</small>'; },
+        function () { var c = selC(); return c ? c.n : 'All metered circuits'; }) +
+      '<section class="card e-per">' + half('Today', 'today', 'Today', 2) + half('This month', 'month', 'Month', 1) + '</section>' +
       '</div><div class="g mt e-low">' +
-      card({ title: 'House power, last 24 h', icon: 'i-bolt', body: '<svg id="e-chart" viewBox="0 0 580 400"></svg><div class="e-tip" id="e-tip" hidden></div>' }) +
-      card({ title: 'Per circuit', body: seg([
-          { label: 'Today', act: 'period', arg: 'today', on: function () { return period === 'today'; } },
-          { label: 'This month', act: 'period', arg: 'month', on: function () { return period === 'month'; } }
-        ]) +
-        '<div id="' + circList + '"></div>' }) +
+      card({ body: tabs + '<div id="' + circList + '"></div>' }) +
+      card({ title: 'House power, last 24 h', icon: 'i-bolt', id: bind(function (el) {
+        var c = selC(); setText(el.querySelector('.card-h span'), (c ? c.n : 'House power') + ', last 24 h'); }), body: '<svg id="e-chart" viewBox="0 0 580 400"></svg><div class="e-tip" id="e-tip" hidden></div>' }) +
       '</div>';
+  }, head: function () {
+    // the price is the same whatever is filtered, so it sits in the page header, red when stale (> 48 h)
+    return '<span class="t-chip" id="' + bind(function (el) {
+      var p = num('ElectricityTariff'), d = OH.parseLocal(st('ElectricityTariffUpdated'));
+      var stale = !d || Date.now() - d.getTime() > 48 * 3600 * 1000;
+      cls(el, 't-chip' + (stale ? ' bad' : ''));
+      setText(el, (isNaN(p) ? '--' : (p * 100).toFixed(2)) + ' ct/kWh' + (stale ? ' · stale' : ''));
+    }) + '"></span>';
   }, after: function () { loadChart(); this.timer = setInterval(loadChart, 5 * 60 * 1000); } };
 
   // 24 h of total metered power: the meters are persisted (influxdb, 1 min), the SUM group is not
@@ -348,20 +421,22 @@
       return OH.getJSON('/rest/persistence/items/EnergyMeter' + c.m + '_Power?serviceId=influxdb&starttime=' + since)
         .then(function (j) { return j.data || []; }).catch(function () { return []; });
     })).then(function (series) {
-      var tot = [];
+      var tot = [], per = {};
       for (var b = 0; b < N; b++) tot.push(0);
-      series.forEach(function (data) {
-        var sum = [], cnt = [], last = 0, i;
+      series.forEach(function (data, ci) {
+        var sum = [], cnt = [], v = [], last = 0, i;
         for (i = 0; i < N; i++) { sum.push(0); cnt.push(0); }
         data.forEach(function (p) { var k = Math.floor((p.time - start) / step); if (k >= 0 && k < N) { sum[k] += parseFloat(p.state); cnt[k]++; } });
-        for (i = 0; i < N; i++) { if (cnt[i]) last = sum[i] / cnt[i]; tot[i] += last; }
+        for (i = 0; i < N; i++) { if (cnt[i]) last = sum[i] / cnt[i]; tot[i] += last; v.push(last); }
+        per[CIRCUITS[ci].m] = v;
       });
-      chart = { v: tot, start: start, step: step };
+      chart = { tot: tot, per: per, start: start, step: step };
       drawChart();
     });
   }
   function drawChart() {
     var svg = $('e-chart'); if (!svg || !chart) return;
+    chart.v = (sel && chart.per[sel]) || chart.tot;
     var W = 580, H = 400, L = 44, R = 8, T = 10, B = 26, v = chart.v, n = v.length;
     var max = Math.max.apply(null, v.concat([100]));
     var stepY = max > 4000 ? 1000 : max > 2000 ? 500 : max > 800 ? 250 : 100;
@@ -544,7 +619,7 @@
           label('Front: temperature', function () { return deg('frontGardenSoilTemperature'); }) }) +
         card({ title: 'Lights', icon: 'i-bulb', body:
           toggle('Veranda', 'VerandaMainLights_Power', 'i-bulb') + slider('Brightness', 'VerandaMainLights_Brightness', { power: 'VerandaMainLights_Power' }) +
-          toggle('Shed', 'ShedLight_ShedLightsPower', 'i-home') + toggle('Christmas lights', 'VerandaChristmasLights_power', 'i-star') }) +
+          toggle('Shed', 'ShedLight_ShedLightsPower', 'i-home') }) +
       '</div></div>';
   } };
 
@@ -553,6 +628,7 @@
   // from the veranda sensor; everything else is the model's.
   var WXP = { f: null, aq: null };
   var OUT_T = 'VerandaTemperatureHumidity_Temperature', OUT_H = 'VerandaTemperatureHumidity_Humidity';
+  var wxRetry = null;
   function loadWx() {
     var L = OH.LOCATION, base = '?latitude=' + L.lat + '&longitude=' + L.lon + '&timezone=Europe%2FAmsterdam';
     OH.getJSON(OH.METEO + '/v1/forecast' + base +
@@ -560,7 +636,10 @@
       '&minutely_15=precipitation&forecast_minutely_15=12' +
       '&hourly=temperature_2m,precipitation_probability,precipitation,weather_code,is_day,wind_speed_10m' +
       '&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,uv_index_max,sunshine_duration' +
-      '&forecast_days=7').then(function (j) { WXP.f = j; WXP.t = Date.now(); drawWx(); }).catch(function () { var e = $('wx-upd'); if (e) e.textContent = 'Forecast unavailable'; });
+      '&forecast_days=7').then(function (j) { WXP.f = j; WXP.t = Date.now(); drawWx(); }).catch(function () {
+        var e = $('wx-upd'); if (e) e.textContent = 'Forecast unavailable · retrying';
+        clearTimeout(wxRetry); wxRetry = setTimeout(function () { if ($('wx-now')) loadWx(); }, 60000);
+      });
     OH.getJSON(OH.METEO + '/v1/air-quality' + base +
       '&current=european_aqi,pm2_5,pm10,alder_pollen,birch_pollen,grass_pollen,mugwort_pollen,ragweed_pollen')
       .then(function (j) { WXP.aq = j; drawAq(); }).catch(function () {});
@@ -693,7 +772,7 @@
     if (current && current.timer) clearInterval(current.timer);
     binds = []; seq = 0;
     current = p;
-    $('title').textContent = p.title;
+    $('title').innerHTML = esc(p.title) + (p.head ? p.head() : '');
     $('tabs').innerHTML = TABS.map(function (t) {
       return '<a class="sub-tab' + (t[0] === name ? ' on' : '') + '" href="#' + t[0] + '">' + icon(t[1]) + '</a>';
     }).join('');

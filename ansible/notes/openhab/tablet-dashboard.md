@@ -52,7 +52,15 @@ without a touch the page goes back to the landing page.
   Sliders send on release.
 * Energy: power now, today, month, price (ct/kWh, "STALE" after 48 h); a 24 h house-power line
   (sum of the meters' influxdb history, touch for a crosshair) and per-circuit power plus a
-  today/month kWh bar per circuit.
+  today/month kWh bar per circuit. The per-circuit list sits left of the chart: tapping a
+  circuit filters the power/today/month tiles, the chart and its title to that meter (`sel` in
+  pages.js; the chart keeps per-meter series); tapping it again or "All" goes back. The card header is two
+  tabs, "All | Per circuit", left-aligned; the underlined one shows the state;
+  tapping "Per circuit" picks the first circuit (Hob right) when none is selected. The selected circuit
+  has a thick accent bar on the card edge. Opening the page always starts at All. Top row: Power now | one card with
+  Today and This month as two tabs (thick accent bar under the active one); the tab picks the
+  period of the list, there is no separate period toggle. The price does not follow the filter,
+  so it is a chip next to the page title (`head:` hook on the page; red "stale" after 48 h).
 * Appliances: washer, dryer, dishwasher (status, progress, programme, door, "waiting to be
   emptied" with Clear), the hood (venting, fan stage 1-3, work light) and the laundry circuit.
 * Cameras: live `autofps.mjpeg` (stopped when leaving the page), the last person snapshot
@@ -135,6 +143,24 @@ copies in `tablet-dashboard/openhab/`):
 * Connection dot (bottom right): green = live event stream, amber = stream down but polling
   `/rest/items` every 15 s, red = no data. Tap it for a status panel (stream state, last event,
   errors, polls, screen size, standalone, user agent). Tap the panel to close it.
+
+## Auto-reload and openHAB restarts (2026-11-20)
+
+* Open pages reload when `version.txt` changes and at 04:00. A reload while openHAB is
+  (re)starting lands on Safari's "not accessible" page, which has no script and never retries, so
+  the home-screen app stays stuck until someone taps it. That happened on 2026-11-20, when
+  version.txt was deployed right after an openHAB start.
+* `core.js` `safeReload()` now reloads only when the page and `/rest/items/Tablet_NightMode/state`
+  both answer; otherwise it keeps the current page and retries on the next version poll (60 s)
+  or, for the nightly reload, every minute from 04:00. Still: deploy tablet files only while
+  openHAB is up.
+* The same evening the home-screen app opened Safari's "cannot connect" page and made no TCP
+  connection at all (SYN never sent) while Mobile Safari and the shell reached pi5 fine. The app
+  itself was wedged: `killall -9 Web symptomsd nsurlsessiond` over SSH and a relaunch from the
+  icon fixed it (no reboot: checkra1n is semi-tethered and SSH/battery reading would be lost).
+  If that is not enough, delete and re-add the home-screen icon.
+* Weather: a failed fetch from `meteo.iot` (e.g. right after such a reset) now retries after
+  1 min on the landing page and the weather page, instead of waiting for the 30-min refresh.
 
 ## Safari 12 rules for this code
 

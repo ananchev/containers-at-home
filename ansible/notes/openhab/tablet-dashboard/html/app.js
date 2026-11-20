@@ -95,8 +95,12 @@
       '&hourly=temperature_2m,precipitation_probability,weather_code,is_day' +
       '&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset' +
       '&timezone=Europe%2FAmsterdam&forecast_days=4';
-    return getJSON(u).then(function (j) { WX = j; renderWeather(); }).catch(function () {});
+    clearTimeout(wxRetry);
+    // a failed fetch (e.g. meteo.iot not resolvable yet right after a launch) retries in a minute,
+    // not only at the next 30-min refresh
+    return getJSON(u).then(function (j) { WX = j; renderWeather(); }).catch(function () { wxRetry = setTimeout(loadWeather, 60000); });
   }
+  var wxRetry = null;
 
   function renderWeather() {
     var t = num(CFG.outsideTemp);
@@ -311,10 +315,12 @@
 
     var issues = num('System_Issues_Count');
     if (issues > 0) {
-      var bad = Object.keys(S).filter(function (k) { return k.indexOf('System_') === 0 && k !== 'System_Issues_Count' && has(k) && st(k) !== 'OK'; })
+      var bad = Object.keys(S).filter(function (k) { return k.indexOf('System_') === 0 && k !== 'System_Issues_Count' && k !== 'System_Batteries' && has(k) && st(k) !== 'OK'; })
         .map(function (k) { return S[k].label || k; });
       out.push({ cls: 'c-bad', icon: 'i-alert', t1: issues + ' system issue' + (issues > 1 ? 's' : ''), t2: bad.join(', ') });
     }
+    // low batteries are maintenance (System_Batteries is not counted in System_Issues_Count)
+    if (has('System_Batteries') && st('System_Batteries') !== 'OK') out.push({ cls: 'c-warn', icon: 'i-alert', t1: 'Replace battery', t2: st('System_Batteries') });
 
     CFG.cameras.forEach(function (c) {
       var p = num(c.persons);
