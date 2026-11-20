@@ -25,7 +25,8 @@
               {
                 'name': (i.value.image.split(':'))[0], 
                 'version': (i.value.image.split(':'))[1], 
-                'include_tags': i.value.diun_include_pattern
+                'include_tags': i.value.diun_include_pattern,
+                'platform': i.value.diun_platform | default('')
               }
             ] }}
         vars:
@@ -47,6 +48,11 @@
             - name: {{ item.name }}
               include_tags:
                 - {{ item.include_tags }}
+            {% if item.platform %}
+              platform:
+                os: {{ item.platform.split('/')[0] }}
+                arch: {{ item.platform.split('/')[1] }}
+            {% endif %}
               metadata:
                 current_version: {{ item.version }}
           create: yes
