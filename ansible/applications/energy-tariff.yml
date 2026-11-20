@@ -20,7 +20,7 @@
     templates_dir: "{{ playbook_dir }}/../_templates"
     app_uid: "10001"                      # the image's non-root user
     energy_tariff_version: "1.0.1"        # bump on code changes
-    python_tag: "{{ app_versions['energy-tariff'].image.split(':')[1] }}"
+    python_tag: "{{ app_versions['python-apps'].image.split(':')[1] }}"
     image_name: "energy-tariff:{{ energy_tariff_version }}-py{{ python_tag }}"
 
   tasks:
@@ -69,7 +69,7 @@
           build:
             path: "{{ host_directory }}/source"
             args:
-              PYTHON_IMAGE: "{{ app_versions['energy-tariff'].image }}"
+              PYTHON_IMAGE: "{{ app_versions['python-apps'].image }}"
             rm: true
           name: "{{ image_name }}"
           force_source: "{{ source_copy.changed }}"
