@@ -32,6 +32,7 @@ application_services:
   caddy:               { hosts: [bnod], ports: { http: 80, https: 443 } }
   containers-backup:   { hosts: [pi5, unas, bnod, vhost, vhost2] }
   cycling-stack:       { hosts: [unas], ports: { coach: 8088, coach_mcp: 8091, auth: 8092, healthbridge: 8000, healthbridge_mcp: 8001 } }
+  debit-notices:       { hosts: [pi5] }                               # bank incasso e-mail notices (outlook.com) -> MQTT
   diun:                { hosts: [unas] }
   docs-bridge:         { hosts: [vhost2], ports: { librechat: 3080 } }   # stack: qdrant+server+librechat
   energy-tariff:       { hosts: [pi5] }                               # supplier price + house kWh -> MQTT/influx

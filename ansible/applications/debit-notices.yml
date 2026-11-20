@@ -1,0 +1,122 @@
+# debit-notices: announced direct debits (incasso's) from the bank's e-mail notices in the outlook.com
+# mailbox -> MQTT (retained: debits/announced, debits/failed, debits/status). No Telegram here: alerts,
+# if wanted, come from openHAB. Details: _templates/debit-notices/app/main.py.
+#
+# Mailbox access: Microsoft Graph, delegated Mail.Read (read-only) via the user's own Entra app
+# registration (public client, device-code flow, no client secret). Settings come from the vault
+# (group_vars/all/vault.yml):
+#   debit_notices:
+#     ms_client_id: <Entra app registration client id>
+#     sender_addresses: [...]   # Graph is asked only for mails from these (filtered on Microsoft's side)
+#     subject_keywords: [...]   # of those, a mail is a notice if its subject has a keyword
+#     body_markers: [...]       #   or its body contains a marker
+# One-time sign-in after the first deploy:
+#   ssh pi5; sudo docker exec -it debit-notices python /app/main.py login
+# The refresh token lives in data/token.json (0600, container uid); the container refreshes it
+# every cycle. No backup definition on purpose (as energy-tariff): it keeps the mail-reading token
+# out of the backups; losing data/ only means signing in again (the state is re-read from the mailbox).
+- hosts: homelab
+  become: true
+  gather_facts: False
+  vars:
+    application: debit-notices
+    host_directory: "{{ docker_data_root }}/{{ application }}"
+    container_name: "{{ application }}"
+    templates_dir: "{{ playbook_dir }}/../_templates"
+    app_uid: "10001"                      # the image's non-root user
+    debit_notices_version: "0.4.0"        # bump on code changes
+    # shared Python base of the small custom apps (energy-tariff, debit-notices)
+    python_tag: "{{ app_versions['python-apps'].image.split(':')[1] }}"
+    image_name: "debit-notices:{{ debit_notices_version }}-py{{ python_tag }}"
+
+  tasks:
+    - name: Run only on the designated host
+      block:
+      - name: The settings must be in the vault
+        ansible.builtin.assert:
+          that:
+            - debit_notices.ms_client_id | default('') | length > 0
+            - debit_notices.sender_addresses | default([]) | length > 0
+            - (debit_notices.subject_keywords | default([]) + debit_notices.body_markers | default([])) | length > 0
+          fail_msg: "debit_notices.ms_client_id, .sender_addresses and .subject_keywords/.body_markers must be set in group_vars/all/vault.yml"
+
+      - name: Create directories
+        ansible.builtin.file:
+          path: "{{ item.path }}"
+          state: directory
+          mode: "{{ item.mode }}"
+          owner: "{{ item.owner | default(omit) }}"
+          group: "{{ item.owner | default(omit) }}"
+        loop:
+          - { path: "{{ host_directory }}", mode: '0755' }
+          - { path: "{{ host_directory }}/source", mode: '0755' }
+          - { path: "{{ host_directory }}/source/app", mode: '0755' }
+          - { path: "{{ host_directory }}/data", mode: '0700', owner: "{{ app_uid }}" }
+
+      - name: Copy the application source
+        ansible.builtin.copy:
+          src: "{{ templates_dir }}/debit-notices/{{ item }}"
+          dest: "{{ host_directory }}/source/{{ item }}"
+          mode: '0644'
+        loop:
+          - Dockerfile
+          - requirements.txt
+          - app/main.py
+        register: source_copy
+
+      # leftovers of 0.2.x: Telegram secrets file, raw sample mails (no mail text is stored now)
+      - name: Remove the old secrets and samples directories
+        ansible.builtin.file:
+          path: "{{ item }}"
+          state: absent
+        loop:
+          - "{{ host_directory }}/secrets"
+          - "{{ host_directory }}/data/samples"
+
+      - name: Build the debit-notices image
+        community.docker.docker_image:
+          source: build
+          build:
+            path: "{{ host_directory }}/source"
+            args:
+              PYTHON_IMAGE: "{{ app_versions['python-apps'].image }}"
+            rm: true
+          name: "{{ image_name }}"
+          force_source: "{{ source_copy.changed }}"
+
+      - name: Run the container
+        community.docker.docker_container:
+          name: "{{ container_name }}"
+          image: "{{ image_name }}"
+          detach: true
+          env:
+            TZ: Europe/Amsterdam
+            MS_CLIENT_ID: "{{ debit_notices.ms_client_id }}"
+            SENDER_ADDRESSES: "{{ debit_notices.sender_addresses | join(',') }}"
+            SUBJECT_KEYWORDS: "{{ debit_notices.subject_keywords | default([]) | join(',') }}"
+            BODY_MARKERS: "{{ debit_notices.body_markers | default([]) | join(',') }}"
+            POLL_MINUTES: "15"
+            LOOKBACK_DAYS: "14"
+            MQTT_HOST: "{{ lan_addresses[application_services['mosquitto'].hosts[0]] }}"
+            MQTT_PORT: "{{ application_services['mosquitto'].ports.mqtt | string }}"
+            MQTT_TOPIC_PREFIX: "debits"
+          volumes:
+            - "{{ host_directory }}/data:/data:Z"
+          restart_policy: unless-stopped
+
+      # remove superseded debit-notices images by name (never prune -a)
+      - name: List debit-notices images
+        ansible.builtin.command: docker images debit-notices --format '{{ '{{' }}.Tag{{ '}}' }}'
+        register: app_images
+        changed_when: false
+
+      # tags only: podman reports the repository as localhost/debit-notices
+      - name: Remove superseded debit-notices images
+        ansible.builtin.command: docker image rm debit-notices:{{ item }}
+        loop: "{{ app_images.stdout_lines | reject('equalto', image_name.split(':')[1]) | reject('equalto', '<none>') | list }}"
+        failed_when: false
+
+      - name: Remove dangling build layers
+        ansible.builtin.command: docker image prune -f
+        changed_when: false
+      when: inventory_hostname in application_services['debit-notices'].hosts
