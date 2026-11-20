@@ -19,6 +19,25 @@
           - "{{ host_directory }}"
           - "{{ host_directory }}/data"
 
+      # GUARD: restore only into an empty target (no configuration.yaml yet), so a
+      # routine re-run never extracts the nightly backup over the live database.db
+      # and configuration.yaml (devices paired since the last backup would be lost).
+      - name: Check whether a live zigbee2mqtt config already exists (restore guard)
+        ansible.builtin.stat:
+          path: "{{ host_directory }}/data/configuration.yaml"
+        register: z2m_config
+
+      - name: Refuse to deploy an empty zigbee2mqtt when no backup is staged
+        ansible.builtin.fail:
+          msg: >-
+            {{ host_directory }}/data has no configuration.yaml and no backup.tar.gz is
+            staged in {{ local_backup_folder }}. Stage the backup and re-run, or pass
+            -e allow_empty_deploy=true for a deliberate fresh install (new network!).
+        when:
+          - not z2m_config.stat.exists
+          - (local_backup_folder + '/backup.tar.gz') is not file
+          - not (allow_empty_deploy | default(false) | bool)
+
       - block:
         - name: Copy the backup archive to the remote machine
           ansible.builtin.copy:
@@ -28,7 +47,9 @@
           ansible.builtin.command: >
             tar -xzvf /tmp/backup.tar.gz -C {{ host_directory }}/data
           become: true
-        when: local_backup_folder is defined and local_backup_folder is not none
+        when:
+          - (local_backup_folder + '/backup.tar.gz') is file
+          - not z2m_config.stat.exists
 
       - name: Run the container
         community.docker.docker_container:

@@ -202,5 +202,9 @@ binding; the garbage dates are restored from mapdb and refreshed by afvalwijzer 
   Recovery: force-remove them in z2m, then add them in the Hue app by serial number with the
   relay ON. They kept their Hue light IDs 9 and 10, so group 3 stayed intact.
 * zigbee2mqtt and mosquitto upgrade independently of openHAB: openHAB uses only generic
-  `mqtt:topic` things. With z2m 2.x, the `/click` topics (`bedroom_night_light_switch`,
-  `test_switch`) become `/action`; update `BedroomNightLightSwitch_Click` in `lights.rules`.
+  `mqtt:topic` things. They rely on z2m `advanced.output: attribute` (one topic per
+  property). Since z2m 2.x (2026-11-20) the bedroom night light switch thing
+  (`mqtt:topic:02be5417`) reads `bedroom_night_light_switch/action` instead of `/click`.
+  The rule in `lights.rules` ignores empty, NULL and UNDEF action updates, so a blank update
+  cannot toggle the light again. `mqtt:topic:fc0460de` (`test_switch/click`) is stale:
+  no z2m device has that name.
